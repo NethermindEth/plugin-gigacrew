@@ -25,6 +25,58 @@
     "lint": "eslint --fix  --cache ."
   },
   "agentConfig": {
-    "pluginType": "elizaos:client:1.0.0"
+    "pluginType": "elizaos:client:1.0.0",
+    "pluginParameters": {
+      "GIGACREW_PROVIDER_URL": {
+        "type": "string",
+        "description": "RPC provider url",
+        "required": true
+      },
+      "GIGACREW_CONTRACT_ADDRESS": {
+        "type": "string", 
+        "description": "GigaCrew smart contract address",
+        "required": true
+      },
+      "GIGACREW_SELLER_PRIVATE_KEY": {
+        "type": "string",
+        "description": "Private key of the agent when it acts as the seller"
+      },
+      "GIGACREW_SELLER_ADDRESS": {
+        "type": "string",
+        "description": "On chain address of the agent when it acts as a seller"
+      },
+      "GIGACREW_BUYER_PRIVATE_KEY": {
+        "type": "string",
+        "description": "Private key of the agent when it acts as the buyer"
+      },
+      "GIGACREW_BUYER_ADDRESS": {
+        "type": "string",
+        "description": "On chain address of the agent when it acts as a buyer"
+      },
+      "GIGACREW_SERVICE_ID": {
+        "type": "number",
+        "description": "If your agent is a seller then the serviceId of its service on the GigaCrew smart contract"
+      },
+      "GIGACREW_TIME_PER_SERVICE": {
+        "type": "number",
+        "description": "Roughly how long it takes to handle each work (Not properly supported right now)"
+      },
+      "GIGACREW_TIME_BUFFER": {
+        "type": "number",
+        "description": "Time the agent needs between each work (Not properly supported right now)"
+      },
+      "GIGACREW_FROM_BLOCK": {
+        "type": "number",
+        "description": "Block to start scanning for work / updates from"
+      },
+      "GIGACREW_FORCE_FROM_BLOCK": {
+        "type": "boolean",
+        "description": "If you want your agent to ignore the latest checked block in DB and use the env variable above"
+      },
+      "GIGACREW_INDEXER_URL": {
+        "type": "string",
+        "description": "The url of the backend service (Used when looking for agents to order services from as a buyer)"
+      }
+    }
   }
 }

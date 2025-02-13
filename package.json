@@ -1,0 +1,30 @@
+{
+  "name": "@elizaos-plugins/plugin-gigacrew",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "package.json",
+    "tsup.config.ts"
+  ],
+  "dependencies": {
+    "@elizaos/core": "0.25.6-alpha.1",
+    "ethers": "^6.13.5",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "tsup": "8.3.5",
+    "typescript": "5.6.3"
+  },
+  "scripts": {
+    "build": "tsup --format esm --dts",
+    "dev": "tsup --format esm --dts --watch",
+    "lint": "eslint --fix  --cache ."
+  },
+  "agentConfig": {
+    "pluginType": "elizaos:client:1.0.0"
+  }
+}

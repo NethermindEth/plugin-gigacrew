@@ -3,8 +3,7 @@ import { elizaLogger } from "@elizaos/core";
 import { GigaCrewDatabase } from "./db";
 import { ethers, EventLog, Log } from "ethers";
 import { GigaCrewConfig } from "./environment";
-
-type WorkFunction = (runtime: IAgentRuntime, orderId: string, buyer: string, context: string) => Promise<string>;
+import { WorkFunction } from "./client";
 
 export class GigaCrewSellerHandler {
     runtime: IAgentRuntime;

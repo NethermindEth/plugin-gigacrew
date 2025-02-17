@@ -4,6 +4,7 @@ import { GigaCrewDatabase } from "./db";
 import { ethers, EventLog } from "ethers";
 import { GigaCrewConfig } from "./environment";
 import { Log } from "ethers";
+import { ProcessWorkFunction } from "./client";
 
 export class GigaCrewBuyerHandler {
     runtime: IAgentRuntime;
@@ -14,8 +15,9 @@ export class GigaCrewBuyerHandler {
     config: GigaCrewConfig;
     db: GigaCrewDatabase;
     orders: any;
+    processWork: ProcessWorkFunction | null;
 
-    constructor(runtime: IAgentRuntime, buyer: ethers.Wallet, contract: ethers.Contract, config: GigaCrewConfig, db: GigaCrewDatabase) {
+    constructor(runtime: IAgentRuntime, buyer: ethers.Wallet, contract: ethers.Contract, config: GigaCrewConfig, db: GigaCrewDatabase, processWork?: ProcessWorkFunction) {
         this.runtime = runtime;
         this.contract = contract.connect(buyer) as ethers.Contract;
         this.buyer = buyer;
@@ -24,6 +26,7 @@ export class GigaCrewBuyerHandler {
         this.config = config;
         this.db = db;
         this.orders = {};
+        this.processWork = processWork;
     }
 
     async filters() {
@@ -121,7 +124,9 @@ export class GigaCrewBuyerHandler {
             resolve(workRequest.work);
         }
 
-        // TODO: Handle work to be implemented by the user
+        if(this.processWork) {
+            this.processWork(workRequest);
+        }
     }
 
     async handleWithdrawals() {

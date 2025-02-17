@@ -4,9 +4,12 @@ import { getGigaCrewConfig, GigaCrewConfig } from "./environment";
 import GigaCrewJSON from "./abi/GigaCrew.json";
 import { GigaCrewSellerHandler } from "./seller";
 import { GigaCrewBuyerHandler } from "./buyer";
-import { workResponseGenerator } from "./worker";
 import { GigaCrewDatabase } from "./db";
+import { workResponseGenerator } from "./worker";
 export * from "./actions";
+
+export type WorkFunction = (runtime: IAgentRuntime, orderId: string, buyer: string, context: string) => Promise<string>;
+export type ProcessWorkFunction = (workRequest: any) => void;
 
 const GigaCrewABI = GigaCrewJSON.abi;
 
@@ -23,7 +26,7 @@ export class GigaCrewClient {
     sellerHandler: GigaCrewSellerHandler | null;
     buyerHandler: GigaCrewBuyerHandler | null;
 
-    constructor(runtime: IAgentRuntime, config: GigaCrewConfig) {
+    constructor(runtime: IAgentRuntime, config: GigaCrewConfig, worker?: WorkFunction, processWork?: ProcessWorkFunction) {
         this.runtime = runtime;
         this.config = config;
 
@@ -54,14 +57,15 @@ export class GigaCrewClient {
             if (!this.config.GIGACREW_SERVICE_ID) {
                 throw new Error("GigaCrew client requires GIGACREW_SERVICE_ID when acting as a seller");
             }
-            this.sellerHandler = new GigaCrewSellerHandler(this.runtime, this.seller, this.contract, this.config, this.db, workResponseGenerator);
+
+            this.sellerHandler = new GigaCrewSellerHandler(this.runtime, this.seller, this.contract, this.config, this.db, worker);
         }
 
         if (this.buyer) {
             if (!this.config.GIGACREW_INDEXER_URL) {
                 throw new Error("GigaCrew client requires GIGACREW_INDEXER_URL when acting as a buyer");
             }
-            this.buyerHandler = new GigaCrewBuyerHandler(this.runtime, this.buyer, this.contract, this.config, this.db);
+            this.buyerHandler = new GigaCrewBuyerHandler(this.runtime, this.buyer, this.contract, this.config, this.db, processWork);
         } else {
             const index = this.runtime.actions.findIndex(action => action.name === "HIRE_AGENT");
             if (index === -1) {
@@ -116,14 +120,18 @@ export class GigaCrewClient {
     }
 }
 
-export const GigaCrewClientInterface: Client = {
-    start: async (runtime: IAgentRuntime) => {
+export class GigaCrew implements Client {
+    worker = workResponseGenerator;
+    processWork: ProcessWorkFunction | null;
+
+    async start(runtime: IAgentRuntime) {
         const config = getGigaCrewConfig(runtime);
-        const client = new GigaCrewClient(runtime, config);
+        const client = new GigaCrewClient(runtime, config, this.worker, this.processWork);
         await client.start();
         return client;
-    },
-    stop: async (_runtime: IAgentRuntime) => {
+    }
+
+    async stop(_runtime: IAgentRuntime) {
         console.warn("GigaCrew client does not support stopping yet");
-    },
+    }
 };

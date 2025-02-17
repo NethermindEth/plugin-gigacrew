@@ -190,7 +190,8 @@ var GigaCrewBuyerHandler = class {
   config;
   db;
   orders;
-  constructor(runtime, buyer, contract, config, db) {
+  processWork;
+  constructor(runtime, buyer, contract, config, db, processWork) {
     this.runtime = runtime;
     this.contract = contract.connect(buyer);
     this.buyer = buyer;
@@ -199,6 +200,7 @@ var GigaCrewBuyerHandler = class {
     this.config = config;
     this.db = db;
     this.orders = {};
+    this.processWork = processWork;
   }
   async filters() {
     return [
@@ -280,6 +282,9 @@ var GigaCrewBuyerHandler = class {
       delete this.orders[workRequest.order_id];
       resolve(workRequest.work);
     }
+    if (this.processWork) {
+      this.processWork(workRequest);
+    }
   }
   async handleWithdrawals() {
     var _a, _b;
@@ -323,111 +328,6 @@ var GigaCrewBuyerHandler = class {
     }, 2e3);
   }
 };
-
-// src/worker.ts
-import { getEmbeddingZeroVector, ModelClass } from "@elizaos/core";
-import { messageCompletionFooter, stringToUuid, composeContext, generateMessageResponse } from "@elizaos/core";
-var messageHandlerTemplate = `
-{{actionExamples}}
-(Action examples are for reference only. Do not use the information from them in your response.)
-
-# Knowledge
-{{knowledge}}
-
-# Task: Respond with what is expected of {{agentName}}.
-About {{agentName}}:
-{{bio}}
-{{lore}}
-
-{{providers}}
-
-{{attachments}}
-
-# Capabilities
-Note that {{agentName}} is capable of reading/seeing/hearing various forms of media, including images, videos, audio, plaintext and PDFs. Recent attachments have been included above under the "Attachments" section.
-
-{{messageDirections}}
-
-{{recentMessages}}
-
-{{actions}}
-
-# Instructions: Write the next message for {{agentName}}.
-` + messageCompletionFooter;
-async function workResponseGenerator(runtime, orderId, buyerAddress, text) {
-  const roomId = stringToUuid(orderId);
-  const userId = stringToUuid(buyerAddress);
-  await runtime.ensureConnection(
-    userId,
-    roomId
-  );
-  const messageId = stringToUuid(Date.now().toString());
-  const content = {
-    text
-  };
-  const userMessage = {
-    content,
-    userId,
-    roomId,
-    agentId: runtime.agentId
-  };
-  const memory = {
-    id: stringToUuid(messageId + "-" + userId),
-    ...userMessage,
-    agentId: runtime.agentId,
-    userId,
-    roomId,
-    content,
-    createdAt: Date.now()
-  };
-  await runtime.messageManager.addEmbeddingToMemory(memory);
-  await runtime.messageManager.createMemory(memory);
-  let state = await runtime.composeState(userMessage, {
-    agentName: runtime.character.name
-  });
-  const context = composeContext({
-    state,
-    template: messageHandlerTemplate
-  });
-  const response = await generateMessageResponse({
-    runtime,
-    context,
-    modelClass: ModelClass.LARGE
-  });
-  if (!response) {
-    throw new Error("No response from generateMessageResponse");
-  }
-  const responseMessage = {
-    id: stringToUuid(messageId + "-" + runtime.agentId),
-    ...userMessage,
-    userId: runtime.agentId,
-    content: response,
-    embedding: getEmbeddingZeroVector(),
-    createdAt: Date.now()
-  };
-  await runtime.messageManager.createMemory(responseMessage);
-  state = await runtime.updateRecentMessageState(state);
-  let message = null;
-  await runtime.processActions(
-    memory,
-    [responseMessage],
-    state,
-    async (newMessages) => {
-      message = newMessages;
-      return [memory];
-    }
-  );
-  await runtime.evaluate(memory, state);
-  const action = runtime.actions.find(
-    (a) => a.name === response.action
-  );
-  const shouldSuppressInitialMessage = action == null ? void 0 : action.suppressInitialMessage;
-  if (!shouldSuppressInitialMessage) {
-    return message ? response.text + "\n" + message.text : response.text;
-  } else {
-    return message ? message.text : "";
-  }
-}
 
 // src/db.ts
 var GigaCrewDatabase = class {
@@ -550,6 +450,111 @@ var GigaCrewDatabase = class {
         `).run(canBuyerWithdraw ? 1 : 0, ...orderIds);
   }
 };
+
+// src/worker.ts
+import { getEmbeddingZeroVector, ModelClass } from "@elizaos/core";
+import { messageCompletionFooter, stringToUuid, composeContext, generateMessageResponse } from "@elizaos/core";
+var messageHandlerTemplate = `
+{{actionExamples}}
+(Action examples are for reference only. Do not use the information from them in your response.)
+
+# Knowledge
+{{knowledge}}
+
+# Task: Respond with what is expected of {{agentName}}.
+About {{agentName}}:
+{{bio}}
+{{lore}}
+
+{{providers}}
+
+{{attachments}}
+
+# Capabilities
+Note that {{agentName}} is capable of reading/seeing/hearing various forms of media, including images, videos, audio, plaintext and PDFs. Recent attachments have been included above under the "Attachments" section.
+
+{{messageDirections}}
+
+{{recentMessages}}
+
+{{actions}}
+
+# Instructions: Write the next message for {{agentName}}.
+` + messageCompletionFooter;
+async function workResponseGenerator(runtime, orderId, buyerAddress, text) {
+  const roomId = stringToUuid(orderId);
+  const userId = stringToUuid(buyerAddress);
+  await runtime.ensureConnection(
+    userId,
+    roomId
+  );
+  const messageId = stringToUuid(Date.now().toString());
+  const content = {
+    text
+  };
+  const userMessage = {
+    content,
+    userId,
+    roomId,
+    agentId: runtime.agentId
+  };
+  const memory = {
+    id: stringToUuid(messageId + "-" + userId),
+    ...userMessage,
+    agentId: runtime.agentId,
+    userId,
+    roomId,
+    content,
+    createdAt: Date.now()
+  };
+  await runtime.messageManager.addEmbeddingToMemory(memory);
+  await runtime.messageManager.createMemory(memory);
+  let state = await runtime.composeState(userMessage, {
+    agentName: runtime.character.name
+  });
+  const context = composeContext({
+    state,
+    template: messageHandlerTemplate
+  });
+  const response = await generateMessageResponse({
+    runtime,
+    context,
+    modelClass: ModelClass.LARGE
+  });
+  if (!response) {
+    throw new Error("No response from generateMessageResponse");
+  }
+  const responseMessage = {
+    id: stringToUuid(messageId + "-" + runtime.agentId),
+    ...userMessage,
+    userId: runtime.agentId,
+    content: response,
+    embedding: getEmbeddingZeroVector(),
+    createdAt: Date.now()
+  };
+  await runtime.messageManager.createMemory(responseMessage);
+  state = await runtime.updateRecentMessageState(state);
+  let message = null;
+  await runtime.processActions(
+    memory,
+    [responseMessage],
+    state,
+    async (newMessages) => {
+      message = newMessages;
+      return [memory];
+    }
+  );
+  await runtime.evaluate(memory, state);
+  const action = runtime.actions.find(
+    (a) => a.name === response.action
+  );
+  const shouldSuppressInitialMessage = action == null ? void 0 : action.suppressInitialMessage;
+  if (!shouldSuppressInitialMessage) {
+    return message ? response.text + "\n" + message.text : response.text;
+  } else {
+    return message ? message.text : "";
+  }
+}
 
 // src/actions/index.ts
 import { generateMessageResponse as generateMessageResponse2, ModelClass as ModelClass2 } from "@elizaos/core";
@@ -774,7 +779,7 @@ var GigaCrewClient = class {
   filters;
   sellerHandler;
   buyerHandler;
-  constructor(runtime, config) {
+  constructor(runtime, config, worker, processWork) {
     this.runtime = runtime;
     this.config = config;
     if (!this.config.GIGACREW_PROVIDER_URL || !this.config.GIGACREW_CONTRACT_ADDRESS) {
@@ -799,13 +804,13 @@ var GigaCrewClient = class {
       if (!this.config.GIGACREW_SERVICE_ID) {
         throw new Error("GigaCrew client requires GIGACREW_SERVICE_ID when acting as a seller");
       }
-      this.sellerHandler = new GigaCrewSellerHandler(this.runtime, this.seller, this.contract, this.config, this.db, workResponseGenerator);
+      this.sellerHandler = new GigaCrewSellerHandler(this.runtime, this.seller, this.contract, this.config, this.db, worker);
     }
     if (this.buyer) {
       if (!this.config.GIGACREW_INDEXER_URL) {
         throw new Error("GigaCrew client requires GIGACREW_INDEXER_URL when acting as a buyer");
       }
-      this.buyerHandler = new GigaCrewBuyerHandler(this.runtime, this.buyer, this.contract, this.config, this.db);
+      this.buyerHandler = new GigaCrewBuyerHandler(this.runtime, this.buyer, this.contract, this.config, this.db, processWork);
     } else {
       const index = this.runtime.actions.findIndex((action) => action.name === "HIRE_AGENT");
       if (index === -1) {
@@ -852,14 +857,16 @@ var GigaCrewClient = class {
     }, 5e3);
   }
 };
-var GigaCrewClientInterface = {
-  start: async (runtime) => {
+var GigaCrew = class {
+  worker = workResponseGenerator;
+  processWork;
+  async start(runtime) {
     const config = getGigaCrewConfig(runtime);
-    const client = new GigaCrewClient(runtime, config);
+    const client = new GigaCrewClient(runtime, config, this.worker, this.processWork);
     await client.start();
     return client;
-  },
-  stop: async (_runtime) => {
+  }
+  async stop(_runtime) {
     console.warn("GigaCrew client does not support stopping yet");
   }
 };
@@ -868,7 +875,7 @@ var GigaCrewClientInterface = {
 var gigaCrewPlugin = {
   name: "GigaCrew",
   description: "GigaCrew plugin",
-  clients: [GigaCrewClientInterface],
+  clients: [new GigaCrew()],
   actions: [GigaCrewHireAction]
 };
 var index_default = gigaCrewPlugin;

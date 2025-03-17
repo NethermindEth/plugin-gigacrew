@@ -47,6 +47,15 @@ export class GigaCrewClient {
 
         this.seller = this.config.GIGACREW_SELLER_PRIVATE_KEY ? new ethers.Wallet(this.config.GIGACREW_SELLER_PRIVATE_KEY, this.provider) : null;
         this.buyer = this.config.GIGACREW_BUYER_PRIVATE_KEY ? new ethers.Wallet(this.config.GIGACREW_BUYER_PRIVATE_KEY, this.provider) : null;
+        
+        if ((runtime.character.settings as any)?.gigacrew?.seller === false) {
+            this.seller = null;
+        }
+
+        if ((runtime.character.settings as any)?.gigacrew?.buyer === false) {
+            this.buyer = null;
+        }
+        
         if (!this.seller && !this.buyer) {
             throw new Error("GigaCrew client requires at least one of GIGACREW_SELLER_PRIVATE_KEY or GIGACREW_BUYER_PRIVATE_KEY");
         }
@@ -80,10 +89,12 @@ export class GigaCrewClient {
 
     async start() {
         if (this.seller) {
+            elizaLogger.info("Gigacrew Client: Starting seller handler");
             this.filters.push(...await this.sellerHandler.filters());
             this.sellerHandler.start();
         }
         if (this.buyer) {
+            elizaLogger.info("Gigacrew Client: Starting buyer handler");
             this.filters.push(...await this.buyerHandler.filters());
             this.buyerHandler.start();
         }

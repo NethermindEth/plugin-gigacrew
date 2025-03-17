@@ -53,9 +53,9 @@ export class GigaCrewBuyerHandler {
         await this.handleWork(order);
     }
 
-    async createEscrow(service: any, deadlinePeriod: number, context: string, callbackData?: string) {
+    async createEscrow(service: any, price: string, deadlinePeriod: number, context: string, callbackData?: string) {
         let deadlineSeconds = Math.max(deadlinePeriod, 100);
-        const tx = await (await this.contract.createEscrow(service.serviceId, deadlineSeconds, context, { value: service.price })).wait();
+        const tx = await (await this.contract.createEscrow(service.serviceId, deadlineSeconds, context, { value: price })).wait();
         
         const orderId = tx.logs[0].args[0].toString();
         const deadline = tx.logs[0].args[5].toString();

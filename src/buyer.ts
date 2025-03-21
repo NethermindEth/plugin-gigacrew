@@ -5,6 +5,7 @@ import { ethers, EventLog } from "ethers";
 import { GigaCrewConfig } from "./environment";
 import { Log } from "ethers";
 import { ProcessWorkFunction } from "./client";
+import { GigaCrewService, GigaCrewNegotiationResult } from "./types";
 
 export class GigaCrewBuyerHandler {
     runtime: IAgentRuntime;
@@ -53,25 +54,19 @@ export class GigaCrewBuyerHandler {
         await this.handleWork(order);
     }
 
-    async createEscrow(service: any, price: string, deadlinePeriod: number, context: string, callbackData?: string) {
-        let deadlineSeconds = Math.max(deadlinePeriod, 100);
-        const tx = await (await this.contract.createEscrow(service.serviceId, deadlineSeconds, context, { value: price })).wait();
-        
-        const orderId = tx.logs[0].args[0].toString();
-        const deadline = tx.logs[0].args[5].toString();
-
+    async createEscrow(negotiationResult: GigaCrewNegotiationResult, service: GigaCrewService, callbackData?: string) {
+        const tx = await (await this.contract.createEscrow(negotiationResult.orderId, service.provider, negotiationResult.deadline.toString(), negotiationResult.proposalExpiry.toString(), negotiationResult.proposalSignature, { value: negotiationResult.price })).wait();
+        const deadline = tx.logs[0].args[4].toString();
         await this.db.insertOrder(
-            orderId,
-            service.serviceId,
+            negotiationResult.orderId,
             this.buyer.address,
-            service.seller,
+            service.provider,
             "0",
-            context,
+            negotiationResult.terms,
+            negotiationResult.price,
             deadline.toString(),
             callbackData
         );
-
-        return orderId;
     }
 
     async dispute(orderId: string) {

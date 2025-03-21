@@ -5,6 +5,8 @@ import { Action, IAgentRuntime, Memory, State } from "@elizaos/core";
 import { calcTrail } from "../negotiation.ts";
 import { NegotiationMessage } from "../negotiation.ts";
 import { WebSocket } from "ws";
+import { GigaCrewNegotiationResult, GigaCrewService } from "../types.ts";
+import { ethers } from "ethers";
 
 export const searchServiceTemplate = `
 # Context: As {{agentName}} you decided to go ahead and hire a service based on the recent conversation that you had.
@@ -154,22 +156,8 @@ export const GigaCrewHireAction: Action = {
             });
         }
 
-        if (typeof negotiationResult.deadline === "string") {
-            negotiationResult.deadline = parseInt(negotiationResult.deadline);
-        }
-
-        if (negotiationResult.deadline == 0) {
-            negotiationResult.deadline = 1;
-        } else if (isNaN(negotiationResult.deadline)) {
-            elizaLogger.error("Invalid deadline", { deadline: negotiationResult.deadline });
-            return callback({
-                text: "Invalid deadline",
-            });
-        }
-        negotiationResult.deadline = negotiationResult.deadline * 60;
-
         // Hire agent
-        const work = await createAndWaitForWork(client, service, negotiationResult, workContext);
+        const work = await createAndWaitForWork(client, negotiationResult, service);
         callback({
             text: work,
         });
@@ -188,7 +176,7 @@ export async function generateServiceQuery(runtime: IAgentRuntime, state: State)
     return query;
 }
 
-export async function searchServices(runtime: IAgentRuntime, query: string, state: State) {
+export async function searchServices(runtime: IAgentRuntime, query: string, state: State): Promise<{ services: GigaCrewService[], serviceSelectionResponse: any }> {
     let services = null;
     let serviceSelectionResponse = null;
     let retries = 0;
@@ -227,7 +215,7 @@ export async function searchServices(runtime: IAgentRuntime, query: string, stat
     return { services, serviceSelectionResponse };
 }
 
-export async function handleServiceSelection(serviceSelectionResponse: any, services: any[]) {
+export async function handleServiceSelection(serviceSelectionResponse: any, services: GigaCrewService[]): Promise<GigaCrewService | string> {
     let service = null;
     if (serviceSelectionResponse.chosen_service_id != null && serviceSelectionResponse.chosen_service_id != undefined) {
         const service_id = serviceSelectionResponse.chosen_service_id.toString();
@@ -269,22 +257,29 @@ export async function generateWorkContext(runtime: IAgentRuntime, service: any, 
     return workContext;
 }
 
-export async function createAndWaitForWork(client: GigaCrewClient, service: any, negotiationResult: any, workContext: string) {
-    const orderId = await client.buyerHandler.createEscrow(service, negotiationResult.price, negotiationResult.deadline, workContext);
+export async function createAndWaitForWork(client: GigaCrewClient, negotiationResult: any, service: GigaCrewService): Promise<string> {
+    await client.buyerHandler.createEscrow(negotiationResult, service);
     elizaLogger.info("GigaCrew: Waiting for work to be done", {
-        orderId,
+        orderId: negotiationResult.orderId,
     });
-    return await client.buyerHandler.waitForWork(orderId);
+    return await client.buyerHandler.waitForWork(negotiationResult.orderId);
 }
 
-export async function negotiate(runtime: IAgentRuntime, client: GigaCrewClient, service: any, workContext: string) {
+export async function negotiate(runtime: IAgentRuntime, client: GigaCrewClient, service: GigaCrewService, workContext: string): Promise<GigaCrewNegotiationResult> {
+    const NEGOTIATION_TIMEOUT = 10000;
+    
     return new Promise((resolve, reject) => {
         let resolved = false;
-        const ws = new WebSocket("ws://localhost:8005");
+        const ws = new WebSocket(service.communicationChannel);
         ws.on('open', async () => {
             elizaLogger.info("GigaCrew: Negotiation channel opened");
             const roomId = crypto.randomUUID();
-            const userId = stringToUuid(service.seller)
+            const userId = stringToUuid(service.provider);
+            await runtime.ensureConnection(
+                userId,
+                roomId,
+            );
+
             let trail = "0x0";
             let processing = true;
             let state = await runtime.composeState({
@@ -298,9 +293,16 @@ export async function negotiate(runtime: IAgentRuntime, client: GigaCrewClient, 
                 agentName: runtime.character.name,
                 serviceTitle: service.title,
                 serviceDescription: service.description,
-                servicePrice: "$" + service.price,
                 workContext,
             });
+
+            let lastProposal = {
+                terms: null,
+                price: null,
+                deadline: null,
+                proposalExpiry: null,
+                proposalSignature: null,
+            };
 
             // Function to handle user input
             const getInput = async (messageId?: string) => {
@@ -316,7 +318,7 @@ export async function negotiate(runtime: IAgentRuntime, client: GigaCrewClient, 
                 });
                 elizaLogger.info("GigaCrew: Generated negotiation response", {
                     type: response.type,
-                    content: response.content,
+                    response: response,
                 });
 
                 if (response.type == "ignore") {
@@ -325,18 +327,33 @@ export async function negotiate(runtime: IAgentRuntime, client: GigaCrewClient, 
                 } else if (response.type == "accept") {
                     resolved = true;
                     ws.close();
-                    resolve(response);
+
+                    const negotiationResult: GigaCrewNegotiationResult = {
+                        orderId: "0x" + trail,
+                        proposalExpiry: lastProposal.proposalExpiry,
+                        terms: lastProposal.terms,
+                        price: lastProposal.price,
+                        deadline: lastProposal.deadline * 60,
+                        proposalSignature: lastProposal.proposalSignature,
+                    };
+                    elizaLogger.info("GigaCrew: Negotiation result", {
+                        negotiationResult,
+                    });
+
+                    resolve(negotiationResult);
                     return;
                 }
 
-                const responseMessage = {
-                    type: response.type,
-                    content: response.content,
+                const responseMessage: NegotiationMessage = {
+                    type: response.type as "msg" | "proposal",
+                    content: response.content as string,
                     timestamp: new Date().getTime(),
-                    signature: client.buyer.address,
                     trail,
                 };
+                elizaLogger.info("GigaCrew: Converted to negotiation response message", { responseMessage });
                 trail = calcTrail(responseMessage as NegotiationMessage);
+                elizaLogger.info("GigaCrew: Calculated trail", { trail });
+                responseMessage.signature = await client.buyer.signingKey.sign(ethers.getBytes("0x" + trail)).serialized;
 
                 const responseMemory: Memory = {
                     id: stringToUuid((messageId ? messageId : stringToUuid(Date.now().toString())) + "-" + runtime.agentId),
@@ -350,7 +367,6 @@ export async function negotiate(runtime: IAgentRuntime, client: GigaCrewClient, 
                     createdAt: Date.now(),
                 };
                 await runtime.messageManager.createMemory(responseMemory);
-                state = await runtime.updateRecentMessageState(state);
 
                 ws.send(JSON.stringify(responseMessage));
                 processing = false;
@@ -373,28 +389,64 @@ export async function negotiate(runtime: IAgentRuntime, client: GigaCrewClient, 
                     return;
                 }
         
-                if (message.timestamp < new Date().getTime() - 5000) {
+                if (message.timestamp < new Date().getTime() - NEGOTIATION_TIMEOUT) {
                     elizaLogger.info("GigaCrew: Message expired");
                     ws.close();
                     return;
                 }
 
-                
                 if (message.trail != trail) {
                     elizaLogger.info("GigaCrew: Invalid trail");
                     ws.close();
                     return;
                 }
-                trail = calcTrail(message as NegotiationMessage);
 
-                await runtime.ensureConnection(
-                    userId,
-                    roomId,
-                );
+                trail = calcTrail(message as NegotiationMessage);
+                const trailBytes = ethers.getBytes("0x" + trail);
+                const extractedUser = ethers.recoverAddress(trailBytes, message.signature);
+                if (extractedUser != service.provider) {
+                    elizaLogger.info("GigaCrew: Invalid signature", {
+                        expected: service.provider,
+                        extracted: extractedUser
+                    });
+                    ws.close();
+                    return;
+                }
+
+                if (message.type == "proposal") {
+                    const GIGACREW_PROPOSAL_PREFIX = new Uint8Array(32);
+                    GIGACREW_PROPOSAL_PREFIX.set(ethers.toUtf8Bytes("GigaCrew Proposal: "))
+                    const abiCoder = new ethers.AbiCoder();
+                    const proposalBytes = ethers.getBytes(abiCoder.encode(
+                        ["bytes32", "bytes32", "uint256", "uint256", "uint256"],
+                        [
+                            ethers.hexlify(GIGACREW_PROPOSAL_PREFIX),
+                            trailBytes,
+                            message.proposalExpiry,
+                            message.price,
+                            message.deadline * 60
+                        ]
+                    ));
+                    const extractedUser = await ethers.recoverAddress(ethers.keccak256(proposalBytes), message.proposalSignature);
+                    if (extractedUser != service.provider) {
+                        elizaLogger.info("GigaCrew: Invalid proposal signature", {
+                            expected: service.provider,
+                            extracted: extractedUser
+                        });
+                        ws.close();
+                        return;
+                    }
+
+                    lastProposal.terms = message.terms;
+                    lastProposal.price = message.price;
+                    lastProposal.deadline = message.deadline;
+                    lastProposal.proposalExpiry = message.proposalExpiry;
+                    lastProposal.proposalSignature = message.proposalSignature;
+                }
 
                 const messageId = stringToUuid(Date.now().toString());
                 const content: Content = {
-                    text: message.content,
+                    text: message.type == "proposal" ? `${message.content}\nBasically\nterms: ${message.terms}\nprice: ${message.price}\ndeadline: ${message.deadline}minutes\n` : message.content as string,
                 };
                 const userMessage = {
                     content,
@@ -448,6 +500,12 @@ const negotiationTemplate = `
 2. Price
 3. Deadline
 
+For negotiations consider the following:
+- Be reasonable and expect the service provider to also be reasonable.
+- Take into consideration the service provider's title and description.
+- If it seems things are going nowhere and there's too much useless back and forth then just ignore. We can just try to find someone else.
+- DO NOT make any concessions on what's to be done everything must be done as requested by the user.
+
 # Background on {{agentName}}
 ## Knowledge:
 {{knowledge}}
@@ -463,27 +521,9 @@ Description: {{serviceDescription}}
 
 {{recentMessages}}
 
-# Rough idea of how to negotiate
-{you}: Hey I need A and B I wanna pay you 100 dollars and I need it done in 3 days
-{user1}: "Proposal" I only do 1 job at a time you can contact me later for B. For now here's our terms 1. A 2. 60 dollars 3. 4 days from today.
-{you}: In that case can you do A in 2 days actually?
-{user1}: "Proposal" Yes but will cost more. 1. A 2. 70 dollars 3. 2 days from today.
-{you}: Ok!
-
 # Instructions
-1. Use minutes for deadline.
-2. Be reasonable in your counter proposals, price and deadline. Take into account the service provider's title and description.
-3. If despite 3-5 tries the service provider and you don't seem to be able to agree on a price or deadline or the terms then use the "ignore" type in your response. We'll find someone else to do the job.
-4. Sometimes the service provider might send you random messages that are not related to the work or negotiation in that case use the "ignore" type in your response.
-5. NEVER USE DECIMALS FOR PRICE. IT MUST ALWAYS BE A WHOLE NUMBER.
-
-Your response must be JSON with following fields:
-1. type
-    - If ignoring "ignore"
-    - If just communicating normally as part of negotiations "msg"
-    - If you agree with a proposal "accept" (You can only do this if the last message was a proposal)
-2. content: the actual text of the message. Be professional and concise.
-3. terms: the terms you agree on.
-4. price: the price you agree on. (make sure it's wrapped in quotes)
-5. deadline: the deadline you agree on in minutes from the creation of the order as a number.
+Your response must ONLY BE A JSON block and nothing else at all.
+The json response has the following fields:
+- type: REQUIRED. The type of your message. It can be "ignore" to stop, "msg" to communicate, "accept" to accept a proposal this can ONLY be used if the last message was a proposal.
+- content: REQUIRED. The actual text of the message. Be professional and concise.
 `;

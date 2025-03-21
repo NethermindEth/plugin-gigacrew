@@ -14,11 +14,11 @@ export class GigaCrewDatabase {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS gigacrew_orders (
                 order_id TEXT PRIMARY KEY,
-                service_id TEXT,
                 buyer_address TEXT,
                 seller_address TEXT,
                 status INTEGER,
                 context TEXT,
+                price TEXT,
                 work TEXT,
                 deadline DATETIME,
                 lock_period DATETIME,
@@ -28,20 +28,45 @@ export class GigaCrewDatabase {
                 can_seller_withdraw BOOL DEFAULT TRUE,
                 can_buyer_withdraw BOOL DEFAULT TRUE
             );
+
+            CREATE TABLE IF NOT EXISTS gigacrew_proposals (
+                proposal_id TEXT PRIMARY KEY,
+                terms TEXT,
+                proposal_expiry DATETIME
+            );
         `);
     }
 
-    async insertOrder(orderId: string, serviceId: string, buyer: string, seller: string, status: string, context: string, deadline: string, callbackData?: string) {
+    async insertProposal(proposalId: string, terms: string, proposalExpiry: string) {
+        return await this.db.prepare(`
+            INSERT INTO gigacrew_proposals (proposal_id, terms, proposal_expiry) VALUES (?, ?, datetime(?, 'unixepoch'));
+        `).run(proposalId, terms, proposalExpiry);
+    }
+
+    async deleteExpiredProposals() {
+        return await this.db.prepare(`
+            DELETE FROM gigacrew_proposals WHERE proposal_expiry < datetime('now', '-5 minutes');
+        `).run();
+    }
+
+    async insertOrder(orderId: string, buyer: string, seller: string, status: string, terms: string, price: string, deadline: string, callbackData?: string) {
+        if (!terms) {
+            const proposal = await this.db.prepare(`
+                    SELECT * FROM gigacrew_proposals WHERE proposal_id = ?;
+            `).get(orderId);
+
+            if (!proposal) {
+                console.error("Proposal not found");
+                return;
+            }
+
+            terms = proposal.terms;
+        }
+
         await this.db.prepare(`
-            INSERT INTO gigacrew_orders (order_id, service_id, buyer_address, seller_address, status, context, deadline, callback_data) 
-            VALUES (?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
-            ON CONFLICT(order_id) DO UPDATE SET
-                service_id=excluded.service_id,
-                buyer_address=excluded.buyer_address,
-                seller_address=excluded.seller_address,
-                context=excluded.context,
-                deadline=excluded.deadline;
-        `).run(orderId, serviceId, buyer, seller, status, context, deadline, callbackData);
+            INSERT INTO gigacrew_orders (order_id, buyer_address, seller_address, status, context, price, deadline, callback_data) 
+            VALUES (?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?) ON CONFLICT(order_id) DO NOTHING;
+        `).run(orderId, buyer, seller, status, terms, price, deadline, callbackData);
     }
 
     async setStatus(orderId: string, status: string) {

@@ -245,8 +245,8 @@ export class GigaCrewSellerHandler {
                     return;
                 }
 
+                trail = calcTrail(data);
                 if (!userId) { // It's the first message
-                    trail = calcTrail(data);
                     const extractedUser = ethers.recoverAddress(ethers.getBytes("0x" + trail), data.signature);
                     elizaLogger.info("Extracted user", {
                         message: data,

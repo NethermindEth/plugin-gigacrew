@@ -5,7 +5,7 @@ import { ethers, EventLog, Log } from "ethers";
 import { GigaCrewConfig } from "./environment";
 import { WebSocketServer } from "ws";
 import crypto from "crypto";
-import { calcTrail, NegotiationMessage } from "./negotiation";
+import { calcTrail, NegotiationMessage, validateMessage } from "gigacrew-negotiation";
 import { WorkFunction } from "./client";
 
 export class GigaCrewSellerHandler {
@@ -194,11 +194,10 @@ export class GigaCrewSellerHandler {
     }
 
     async startNegotiator() {
-        const NEGOTIATION_TIMEOUT = 10000;
         const PROPOSAL_EXPIRY = 5 * 60 * 1000;
         const server = new WebSocketServer({ port: 8005 });
 
-        server.on('connection', async (socket) => {
+        server.on('connection', async (socket, req) => {
             // Any new socket is a new room
             const roomId = crypto.randomUUID();
             let buyer: string | undefined;
@@ -218,42 +217,27 @@ export class GigaCrewSellerHandler {
                 }
                 processing = true;
 
-                let data: NegotiationMessage;
-                try {
-                    data = NegotiationMessage.parse(JSON.parse(message.toString()));
-                } catch (error) {
-                    elizaLogger.error("Error parsing negotiation message", { error });
+                const validateMessageResult = validateMessage(message.toString(), trail);
+                let data = validateMessageResult.message;
+                trail = validateMessageResult.trail;
+                if (!data) {
+                    elizaLogger.error("Invalid message", { message });
                     socket.close();
                     return;
-                }
-
-                if (data.type != "msg") {
+                } else if (data.type != "msg") {
                     elizaLogger.error("Invalid message type", { data });
                     socket.close();
                     return;
                 }
 
-                if (data.timestamp < new Date().getTime() - NEGOTIATION_TIMEOUT) {
-                    elizaLogger.error("Message expired", { data });
-                    socket.close();
-                    return;
-                }
-
-                if (trail != data.trail) {
-                    elizaLogger.error("Trail mismatch", { trail, data });
-                    socket.close();
-                    return;
-                }
-
-                trail = calcTrail(data);
                 if (!userId) { // It's the first message
-                    const extractedUser = ethers.recoverAddress(ethers.getBytes("0x" + trail), data.signature);
-                    elizaLogger.info("Extracted user", {
-                        message: data,
-                        extractedUser: extractedUser.toString()
-                    });
+                    // const extractedUser = ethers.recoverAddress(ethers.getBytes("0x" + trail), data.signature);
+                    // elizaLogger.info("Extracted user", {
+                    //     message: data,
+                    //     extractedUser: extractedUser.toString()
+                    // });
 
-                    buyer = extractedUser.toString();
+                    buyer = req.socket.remoteAddress.toString();
                     userId = stringToUuid(buyer);
                     key = data.key;
                     await this.runtime.ensureConnection(
@@ -349,7 +333,7 @@ export class GigaCrewSellerHandler {
                 trail = calcTrail(responseMessage as NegotiationMessage);
                 elizaLogger.info("GigaCrew: Calculated trail", { trail });
                 const trailBytes = ethers.getBytes("0x" + trail);
-                responseMessage.signature = await this.seller.signingKey.sign(trailBytes).serialized;
+                // responseMessage.signature = await this.seller.signingKey.sign(trailBytes).serialized;
 
                 if (responseMessage.type == "proposal") {
                     const GIGACREW_PROPOSAL_PREFIX = new Uint8Array(32);

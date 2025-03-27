@@ -1,5 +1,8 @@
-import { Plugin } from '@elizaos/core';
+import { Action, Plugin } from '@elizaos/core';
+export { NegotiationMessage, calcTrail } from 'gigacrew-negotiation';
+
+declare const GigaCrewListServicesAction: Action;
 
 declare const gigaCrewPlugin: Plugin;
 
-export { gigaCrewPlugin as default };
+export { GigaCrewListServicesAction, gigaCrewPlugin as default };

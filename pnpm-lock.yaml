@@ -14,6 +14,9 @@ importers:
       ethers:
         specifier: ^6.13.5
         version: 6.13.5
+      gigacrew-negotiation:
+        specifier: file:../gigacrew-negotiation
+        version: file:../gigacrew-negotiation
       ws:
         specifier: ^8.18.0
         version: 8.18.0
@@ -966,6 +969,9 @@ packages:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
 
+  crypto-js@4.2.0:
+    resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
+
   dateformat@4.6.3:
     resolution: {integrity: sha512-2P0p0pFGzHS5EMnhdxQi7aJN+iMheud0UhG4dlE1DLAlvL8JHjJJTX/CSm4JXwV0Ka5nGk3zC5mcb5bUQUxxMA==}
 
@@ -1107,6 +1113,9 @@ packages:
   gcp-metadata@6.1.1:
     resolution: {integrity: sha512-a4tiq7E0/5fTjxPAaH4jpjkSv/uCaU2p5KC6HVGrvl0cDjA8iBZv4vv1gyzlmK0ZUKqwpOyQMKzZQe3lTit77A==}
     engines: {node: '>=14'}
+
+  gigacrew-negotiation@file:../gigacrew-negotiation:
+    resolution: {directory: ../gigacrew-negotiation, type: directory}
 
   glob@10.4.5:
     resolution: {integrity: sha512-7Bv8RF0k6xjo7d4A/PxYLbUCfb6c+Vpd2/mB2yRDlew7Jb5hEXiCD9ibfO7wpk8i4sevK6DFny9h7EYbM3/sHg==}
@@ -3017,6 +3026,8 @@ snapshots:
       shebang-command: 2.0.0
       which: 2.0.2
 
+  crypto-js@4.2.0: {}
+
   dateformat@4.6.3: {}
 
   debug@4.4.0:
@@ -3167,6 +3178,14 @@ snapshots:
     transitivePeerDependencies:
       - encoding
       - supports-color
+
+  gigacrew-negotiation@file:../gigacrew-negotiation:
+    dependencies:
+      crypto-js: 4.2.0
+      ethers: 6.13.5
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   glob@10.4.5:
     dependencies:

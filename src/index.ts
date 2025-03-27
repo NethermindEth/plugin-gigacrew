@@ -1,6 +1,7 @@
 import { Plugin } from "@elizaos/core";
 import { GigaCrew } from "./client";
-import { GigaCrewHireAction } from "./actions";
+import { GigaCrewHireAction, GigaCrewListServicesAction } from "./actions";
+import { NegotiationMessage, calcTrail } from "gigacrew-negotiation";
 
 const gigaCrewPlugin = {
     name: "GigaCrew",
@@ -9,4 +10,5 @@ const gigaCrewPlugin = {
     actions: [GigaCrewHireAction],
 } as Plugin;
 
+export { GigaCrewListServicesAction, calcTrail, NegotiationMessage };
 export default gigaCrewPlugin;

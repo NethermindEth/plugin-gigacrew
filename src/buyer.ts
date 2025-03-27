@@ -105,13 +105,6 @@ export class GigaCrewBuyerHandler {
         });
     }
 
-    async searchServices(query: string) {
-        const endpoint = this.config.GIGACREW_INDEXER_URL + "/api/services/search";
-        const response = await fetch(`${endpoint}?query=${encodeURIComponent(query)}&limit=10`);
-        const data = await response.json();
-        return data;
-    }
-
     async handleWork(workRequest: any) {
         const resolve = this.orders[workRequest?.order_id];
         if (resolve) {

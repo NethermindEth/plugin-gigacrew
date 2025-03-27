@@ -13,6 +13,7 @@
   "dependencies": {
     "@elizaos/core": "0.25.6-alpha.1",
     "ethers": "^6.13.5",
+    "gigacrew-negotiation": "file:../gigacrew-negotiation",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -33,7 +34,7 @@
         "required": true
       },
       "GIGACREW_CONTRACT_ADDRESS": {
-        "type": "string", 
+        "type": "string",
         "description": "GigaCrew smart contract address",
         "required": true
       },

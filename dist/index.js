@@ -1,6 +1,6 @@
 // src/client.ts
-import { elizaLogger as elizaLogger4 } from "@elizaos/core";
-import { ethers as ethers4 } from "ethers";
+import { elizaLogger as elizaLogger6 } from "@elizaos/core";
+import { ethers as ethers3 } from "ethers";
 
 // src/environment.ts
 function getGigaCrewConfig(runtime) {
@@ -29,36 +29,8 @@ import { composeContext, generateMessageResponse, getEmbeddingZeroVector, ModelC
 import { elizaLogger } from "@elizaos/core";
 import { ethers } from "ethers";
 import { WebSocketServer } from "ws";
-import crypto3 from "crypto";
-
-// src/negotiation.ts
-import { z } from "zod";
 import crypto2 from "crypto";
-var NegotiationMessage = z.object({
-  type: z.enum(["msg", "proposal"]),
-  content: z.string(),
-  timestamp: z.number(),
-  trail: z.string(),
-  price: z.string().regex(/^\d+$/).optional(),
-  deadline: z.number().optional(),
-  terms: z.string().optional(),
-  proposalExpiry: z.number().optional(),
-  signature: z.string(),
-  proposalSignature: z.string().optional(),
-  key: z.string().optional()
-});
-function calcTrail(message) {
-  let hash = message.trail;
-  for (const key of Object.keys(message).sort()) {
-    if (key == "trail" || key == "signature" || key == "proposalSignature") continue;
-    const value = message[key];
-    const valueHash = crypto2.createHash("sha256").update(value == null ? void 0 : value.toString()).digest("hex");
-    hash = crypto2.createHash("sha256").update(hash + valueHash).digest("hex");
-  }
-  return hash;
-}
-
-// src/seller.ts
+import { calcTrail, validateMessage } from "gigacrew-negotiation";
 var GigaCrewSellerHandler = class {
   runtime;
   contract;
@@ -220,11 +192,10 @@ var GigaCrewSellerHandler = class {
     }, 2e3);
   }
   async startNegotiator() {
-    const NEGOTIATION_TIMEOUT = 1e4;
     const PROPOSAL_EXPIRY = 5 * 60 * 1e3;
     const server = new WebSocketServer({ port: 8005 });
-    server.on("connection", async (socket) => {
-      const roomId = crypto3.randomUUID();
+    server.on("connection", async (socket, req) => {
+      const roomId = crypto2.randomUUID();
       let buyer;
       let userId;
       let key;
@@ -238,37 +209,20 @@ var GigaCrewSellerHandler = class {
           return;
         }
         processing = true;
-        let data;
-        try {
-          data = NegotiationMessage.parse(JSON.parse(message.toString()));
-        } catch (error) {
-          elizaLogger.error("Error parsing negotiation message", { error });
+        const validateMessageResult = validateMessage(message.toString(), trail);
+        let data = validateMessageResult.message;
+        trail = validateMessageResult.trail;
+        if (!data) {
+          elizaLogger.error("Invalid message", { message });
           socket.close();
           return;
-        }
-        if (data.type != "msg") {
+        } else if (data.type != "msg") {
           elizaLogger.error("Invalid message type", { data });
           socket.close();
           return;
         }
-        if (data.timestamp < (/* @__PURE__ */ new Date()).getTime() - NEGOTIATION_TIMEOUT) {
-          elizaLogger.error("Message expired", { data });
-          socket.close();
-          return;
-        }
-        if (trail != data.trail) {
-          elizaLogger.error("Trail mismatch", { trail, data });
-          socket.close();
-          return;
-        }
-        trail = calcTrail(data);
         if (!userId) {
-          const extractedUser = ethers.recoverAddress(ethers.getBytes("0x" + trail), data.signature);
-          elizaLogger.info("Extracted user", {
-            message: data,
-            extractedUser: extractedUser.toString()
-          });
-          buyer = extractedUser.toString();
+          buyer = req.socket.remoteAddress.toString();
           userId = stringToUuid(buyer);
           key = data.key;
           await this.runtime.ensureConnection(
@@ -354,7 +308,6 @@ var GigaCrewSellerHandler = class {
         trail = calcTrail(responseMessage);
         elizaLogger.info("GigaCrew: Calculated trail", { trail });
         const trailBytes = ethers.getBytes("0x" + trail);
-        responseMessage.signature = await this.seller.signingKey.sign(trailBytes).serialized;
         if (responseMessage.type == "proposal") {
           const GIGACREW_PROPOSAL_PREFIX = new Uint8Array(32);
           GIGACREW_PROPOSAL_PREFIX.set(ethers.toUtf8Bytes("GigaCrew Proposal: "));
@@ -528,12 +481,6 @@ var GigaCrewBuyerHandler = class {
         }, timeout);
       }
     });
-  }
-  async searchServices(query) {
-    const endpoint = this.config.GIGACREW_INDEXER_URL + "/api/services/search";
-    const response = await fetch(`${endpoint}?query=${encodeURIComponent(query)}&limit=10`);
-    const data = await response.json();
-    return data;
   }
   async handleWork(workRequest) {
     const resolve = this.orders[workRequest == null ? void 0 : workRequest.order_id];
@@ -836,70 +783,87 @@ async function workResponseGenerator(runtime, orderId, buyerAddress, text) {
 }
 
 // src/actions/index.ts
-import { generateMessageResponse as generateMessageResponse3, getEmbeddingZeroVector as getEmbeddingZeroVector3, ModelClass as ModelClass3, stringToUuid as stringToUuid3 } from "@elizaos/core";
-import { composeContext as composeContext3, elizaLogger as elizaLogger3, generateText } from "@elizaos/core";
+import { generateMessageResponse as generateMessageResponse3, getEmbeddingZeroVector as getEmbeddingZeroVector4, ModelClass as ModelClass3, stringToUuid as stringToUuid4 } from "@elizaos/core";
+import { composeContext as composeContext3, elizaLogger as elizaLogger5, generateText } from "@elizaos/core";
+import { calcTrail as calcTrail2, validateMessage as validateMessage2 } from "gigacrew-negotiation";
 import { WebSocket } from "ws";
-import { ethers as ethers3 } from "ethers";
-var searchServiceTemplate = `
-# Context: As {{agentName}} you decided to go ahead and hire a service based on the recent conversation that you had.
-# Task: The first step is to search for services that align with the needs. Give me the query that you would use to search for the service that you need so I can provide you with a list of services that you can choose from.
-About {{agentName}}:
-{{bio}}
-{{lore}}
-{{knowledge}}
 
-{{providers}}
+// src/actions/list_services.ts
+import { elizaLogger as elizaLogger3, getEmbeddingZeroVector as getEmbeddingZeroVector3, stringToUuid as stringToUuid3 } from "@elizaos/core";
+var GigaCrewListServicesAction = {
+  name: "LIST_SERVICES",
+  similes: ["LIST_SERVICE", "LIST_AGENTS"],
+  description: "Use this action when you need to list services / agents that are available to be hired to do some task. And if a user wants to hire one of the services you can use the HAND_OFF_<provider_address> action",
+  examples: [
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "Hey I need help with a calculation!"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Here are the services that are available to be hired on GigaCrew that seem to be related to what you need help with.",
+          action: "LIST_SERVICES"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "ID: 2\nTitle: Calculator Service\nDescription: I do calculations for you\nProvider: 0x123\n\nID: 7\nTitle: Math tutor\nDescription: I can help you with maths\nProvider: 0x777"
+        }
+      },
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I want the first one"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Got it. You are now handed off to the service provider for negotiation. Please talk about what you need in details and negotiate with him directly.",
+          action: "HAND_OFF_0x123"
+        }
+      }
+    ]
+  ],
+  validate: async (runtime, message, state) => {
+    return true;
+  },
+  handler: async (runtime, message, state, options, callback) => {
+    elizaLogger3.info("GigaCrew LIST_SERVICES action called", {
+      message: message.content.text
+    });
+    const query = await generateServiceQuery(runtime, state);
+    const { services, serviceSelectionResponse } = await searchAndSelectService(runtime, query, state, true);
+    const chosen_services = await handleServiceSelection(serviceSelectionResponse, services, true);
+    const serviceList = chosen_services.map((service) => `ID: ${service.serviceId}
+Title: ${service.title.replace(/\\n/g, " ")}
+Description: ${service.description.replace(/\\n/g, " ")}
+Provider: ${service.provider}`).join("\n\n");
+    const responseMessage = {
+      id: stringToUuid3(stringToUuid3(Date.now().toString()) + "-" + runtime.agentId),
+      userId: runtime.agentId,
+      agentId: runtime.agentId,
+      roomId: message.roomId,
+      content: {
+        text: serviceList
+      },
+      embedding: getEmbeddingZeroVector3(),
+      createdAt: Date.now()
+    };
+    await runtime.messageManager.createMemory(responseMessage);
+    callback({
+      text: serviceList
+    });
+  }
+};
 
-{{messageDirections}}
-
-{{recentMessages}}
-
-# Instructions: The query should be less than 100 words and explain the type of service that you need. Your response MUST ONLY contain the query.
-`;
-var selectServiceTemplate = `
-# Context: As {{agentName}} you decided to go ahead and hire a service based on the recent conversation that you had. And then you searched for services that aligned with the needs.
-You used this query to search for services: {{serviceQuery}}
-
-# ServiceList:
-{{serviceList}}
-
-# Task: Now you need to either 1. Select a service from the list 2. Decide that you want to search again with a different query 3. Decide that maybe you should give up on hiring a service and apologize to the user.
-About {{agentName}}:
-{{bio}}
-{{lore}}
-{{knowledge}}
-
-{{providers}}
-
-{{messageDirections}}
-
-{{recentMessages}}
-
-# Instructions
-Your response must be formatted in a JSON block.
-The possible fields are "chosen_service_id", "new_query" and "apology".
-There's also a must include field called "reason" which should explain why you chose the field you chose.
-`;
-var workContextTemplate = `
-# Context: As {{agentName}} you decided to go ahead and hire a service based on the recent conversation that you had. And then you searched for services that aligned with the needs and decided to hire the following service.
-# Service
-{{serviceTitle}}
-{{serviceDescription}}
-
-# Task: Think of the job that you decided to hire this service for based on your recent conversation. Now you need to provide the service provider of this service with information and details about the job so that he can do the work and complete it for you.
-About {{agentName}}:
-{{bio}}
-{{lore}}
-{{knowledge}}
-
-{{providers}}
-
-{{messageDirections}}
-
-{{recentMessages}}
-
-# Instructions: Be concise and to the point. Only provide information and context about the job. No need for any other information or formalities.
-`;
+// src/actions/hire.ts
+import { elizaLogger as elizaLogger4 } from "@elizaos/core";
 var GigaCrewHireAction = {
   name: "HIRE_AGENT",
   similes: ["HIRE_SERVICE", "SEARCH_SERVICES"],
@@ -946,12 +910,12 @@ var GigaCrewHireAction = {
     return true;
   },
   handler: async (runtime, message, state, options, callback) => {
-    elizaLogger3.info("GigaCrew HIRE_AGENT action called", {
+    elizaLogger4.info("GigaCrew HIRE_AGENT action called", {
       message: message.content.text
     });
     const client = runtime.clients.find((c) => c instanceof GigaCrewClient);
     const query = await generateServiceQuery(runtime, state);
-    const { services, serviceSelectionResponse } = await searchServices(runtime, query, state);
+    const { services, serviceSelectionResponse } = await searchAndSelectService(runtime, query, state);
     const service = await handleServiceSelection(serviceSelectionResponse, services);
     if (typeof service === "string") {
       return callback({
@@ -963,7 +927,7 @@ var GigaCrewHireAction = {
     try {
       negotiationResult = await negotiate(runtime, client, service, workContext);
     } catch (error) {
-      elizaLogger3.error("Negotiation failed", { error });
+      elizaLogger4.error("Negotiation failed", { error });
       return callback({
         text: "Negotiation failed"
       });
@@ -974,39 +938,134 @@ var GigaCrewHireAction = {
     });
   }
 };
+
+// src/actions/index.ts
+var searchServiceTemplate = `
+# Context: As {{agentName}} you decided to go ahead and hire a service based on the recent conversation that you had.
+
+# Task: The first step is to search for services that align with the needs. Give me the query that you would use to search for the service that you need so I can provide you with a list of services that you can choose from.
+
+About {{agentName}}:
+{{bio}}
+{{lore}}
+{{knowledge}}
+
+{{providers}}
+
+{{messageDirections}}
+
+{{recentMessages}}
+
+# Instructions: The query should be less than 100 words and explain the type of service that you need in the form of a search query rather than a message to someone. Your response MUST ONLY contain the query.
+`;
+var selectManyServicesTemplate = `
+You used this query to search for some services: {{serviceQuery}}
+Now the results are in and you can see them below.
+
+# ServiceList:
+{{serviceList}}
+
+# Task: Now you need to either 1. Pick ALL the services in the list that seem appropriate based on the query 2. Decide that you want to search again with a different query because NONE of the services seem useful for it 3. Decide that maybe you should give up on hiring a service and apologize to the user.
+So you're basically being used to filter out the services that are irrelevant.
+
+About {{agentName}}:
+{{bio}}
+{{lore}}
+{{knowledge}}
+
+{{providers}}
+
+{{messageDirections}}
+
+{{recentMessages}}
+
+# Instructions
+Your response must be formatted in a JSON block.
+The possible fields are "chosen_service_ids", "new_query" and "apology".
+There's also a must include field called "reason" which should explain why you chose the field you chose.
+`;
+var selectServiceTemplate = `
+# Context: As {{agentName}} you decided to go ahead and hire a service based on the recent conversation that you had. And then you searched for services that aligned with the needs.
+You used this query to search for services: {{serviceQuery}}
+
+# ServiceList:
+{{serviceList}}
+
+# Task: Now you need to either 1. Select a service from the list 2. Decide that you want to search again with a different query 3. Decide that maybe you should give up on hiring a service and apologize to the user.
+About {{agentName}}:
+{{bio}}
+{{lore}}
+{{knowledge}}
+
+{{providers}}
+
+{{messageDirections}}
+
+{{recentMessages}}
+
+# Instructions
+Your response must be formatted in a JSON block.
+The possible fields are "chosen_service_id", "new_query" and "apology".
+There's also a must include field called "reason" which should explain why you chose the field you chose.
+`;
+var workContextTemplate = `
+# Context: As {{agentName}} you decided to go ahead and hire a service based on the recent conversation that you had. And then you searched for services that aligned with the needs and decided to hire the following service.
+# Service
+{{serviceTitle}}
+{{serviceDescription}}
+
+# Task: Think of the job that you decided to hire this service for based on your recent conversation. Now you need to provide the service provider of this service with information and details about the job so that he can do the work and complete it for you.
+About {{agentName}}:
+{{bio}}
+{{lore}}
+{{knowledge}}
+
+{{providers}}
+
+{{messageDirections}}
+
+{{recentMessages}}
+
+# Instructions: Be concise and to the point. Only provide information and context about the job. No need for any other information or formalities.
+`;
 async function generateServiceQuery(runtime, state) {
   const searchContext = composeContext3({
     state,
     template: searchServiceTemplate
   });
   const query = await generateText({ runtime, context: searchContext, modelClass: ModelClass3.SMALL });
-  elizaLogger3.info("GigaCrew: Generated service query", {
+  elizaLogger5.info("GigaCrew: Generated service query", {
     serviceQuery: query
   });
   return query;
 }
-async function searchServices(runtime, query, state) {
+async function searchServices2(runtime, query) {
+  const endpoint = (runtime.getSetting("GIGACREW_INDEXER_URL") || process.env.GIGACREW_INDEXER_URL) + "/api/services/search";
+  const response = await fetch(`${endpoint}?query=${encodeURIComponent(query)}&limit=10`);
+  const data = await response.json();
+  return data;
+}
+async function searchAndSelectService(runtime, query, state, many = false) {
   let services = null;
   let serviceSelectionResponse = null;
   let retries = 0;
-  const client = runtime.clients.find((c) => c instanceof GigaCrewClient);
   do {
-    services = await client.buyerHandler.searchServices(query);
-    elizaLogger3.info("GigaCrew HIRE_AGENT action searched for services", {
+    services = await searchServices2(runtime, query);
+    elizaLogger5.info("GigaCrew HIRE_AGENT action searched for services", {
       services
     });
     state["serviceQuery"] = query;
     state["serviceList"] = !Array.isArray(services) || services.length == 0 ? "NO SERVICES FOUND" : services.map((service) => `ID: ${service.serviceId} - Title: ${service.title.replace(/\\n/g, " ")} - Description: ${service.description.replace(/\\n/g, " ")}`).join("\n");
     const serviceContext = composeContext3({
       state,
-      template: selectServiceTemplate
+      template: many ? selectManyServicesTemplate : selectServiceTemplate
     });
     serviceSelectionResponse = await generateMessageResponse3({
       runtime,
       context: serviceContext,
       modelClass: ModelClass3.SMALL
     });
-    elizaLogger3.info("GigaCrew: Service selection response", serviceSelectionResponse);
+    elizaLogger5.info("GigaCrew: Service selection response", serviceSelectionResponse);
     if (serviceSelectionResponse.new_query && serviceSelectionResponse.new_query.length > 0) {
       query = serviceSelectionResponse.new_query;
       if (query == "null" || query == "undefined") {
@@ -1019,24 +1078,25 @@ async function searchServices(runtime, query, state) {
   } while (query && retries < 3);
   return { services, serviceSelectionResponse };
 }
-async function handleServiceSelection(serviceSelectionResponse, services) {
+async function handleServiceSelection(serviceSelectionResponse, services, many = false) {
+  const field_name = many ? "chosen_service_ids" : "chosen_service_id";
   let service = null;
-  if (serviceSelectionResponse.chosen_service_id != null && serviceSelectionResponse.chosen_service_id != void 0) {
-    const service_id = serviceSelectionResponse.chosen_service_id.toString();
-    service = services.find((service2) => service2.serviceId === service_id);
+  if (serviceSelectionResponse[field_name] != null && serviceSelectionResponse[field_name] != void 0) {
+    const service_ids = many ? serviceSelectionResponse[field_name].map((id) => id.toString()) : [serviceSelectionResponse[field_name].toString()];
+    service = services.filter((service2) => service_ids.includes(service2.serviceId));
   } else if (serviceSelectionResponse.apology && serviceSelectionResponse.apology.length > 0) {
     if (serviceSelectionResponse.apology != "null" && serviceSelectionResponse.apology != "undefined") {
-      elizaLogger3.info("GigaCrew HIRE_AGENT action no service selected... using apology", {
+      elizaLogger5.info("GigaCrew no service selected... using apology", {
         apology: serviceSelectionResponse.apology
       });
       return serviceSelectionResponse.apology;
     }
   }
   if (!service) {
-    elizaLogger3.info("GigaCrew HIRE_AGENT action bad serviceId... using fallback apology");
+    elizaLogger5.info("GigaCrew bad serviceId... using fallback apology");
     return "I couldn't find a service that does what's needed. I'm sorry.";
   }
-  return service;
+  return many ? service : service[0];
 }
 async function generateWorkContext(runtime, service, state) {
   state["serviceTitle"] = service.title;
@@ -1050,27 +1110,26 @@ async function generateWorkContext(runtime, service, state) {
     context,
     modelClass: ModelClass3.SMALL
   });
-  elizaLogger3.info("GigaCrew: Generated work context", {
+  elizaLogger5.info("GigaCrew: Generated work context", {
     workContext
   });
   return workContext;
 }
 async function createAndWaitForWork(client, negotiationResult, service) {
   await client.buyerHandler.createEscrow(negotiationResult, service);
-  elizaLogger3.info("GigaCrew: Waiting for work to be done", {
+  elizaLogger5.info("GigaCrew: Waiting for work to be done", {
     orderId: negotiationResult.orderId
   });
   return await client.buyerHandler.waitForWork(negotiationResult.orderId);
 }
 async function negotiate(runtime, client, service, workContext) {
-  const NEGOTIATION_TIMEOUT = 1e4;
   return new Promise((resolve, reject) => {
     let resolved = false;
     const ws = new WebSocket(service.communicationChannel);
     ws.on("open", async () => {
-      elizaLogger3.info("GigaCrew: Negotiation channel opened");
+      elizaLogger5.info("GigaCrew: Negotiation channel opened");
       const roomId = crypto.randomUUID();
-      const userId = stringToUuid3(service.provider);
+      const userId = stringToUuid4(service.provider);
       await runtime.ensureConnection(
         userId,
         roomId
@@ -1107,7 +1166,7 @@ async function negotiate(runtime, client, service, workContext) {
           context,
           modelClass: ModelClass3.MEDIUM
         });
-        elizaLogger3.info("GigaCrew: Generated negotiation response", {
+        elizaLogger5.info("GigaCrew: Generated negotiation response", {
           type: response.type,
           response
         });
@@ -1125,7 +1184,7 @@ async function negotiate(runtime, client, service, workContext) {
             deadline: lastProposal.deadline * 60,
             proposalSignature: lastProposal.proposalSignature
           };
-          elizaLogger3.info("GigaCrew: Negotiation result", {
+          elizaLogger5.info("GigaCrew: Negotiation result", {
             negotiationResult
           });
           resolve(negotiationResult);
@@ -1137,19 +1196,18 @@ async function negotiate(runtime, client, service, workContext) {
           timestamp: (/* @__PURE__ */ new Date()).getTime(),
           trail
         };
-        elizaLogger3.info("GigaCrew: Converted to negotiation response message", { responseMessage });
-        trail = calcTrail(responseMessage);
-        elizaLogger3.info("GigaCrew: Calculated trail", { trail });
-        responseMessage.signature = await client.buyer.signingKey.sign(ethers3.getBytes("0x" + trail)).serialized;
+        elizaLogger5.info("GigaCrew: Converted to negotiation response message", { responseMessage });
+        trail = calcTrail2(responseMessage);
+        elizaLogger5.info("GigaCrew: Calculated trail", { trail });
         const responseMemory = {
-          id: stringToUuid3((messageId ? messageId : stringToUuid3(Date.now().toString())) + "-" + runtime.agentId),
+          id: stringToUuid4((messageId ? messageId : stringToUuid4(Date.now().toString())) + "-" + runtime.agentId),
           roomId,
           userId: runtime.agentId,
           agentId: runtime.agentId,
           content: {
             text: response.content
           },
-          embedding: getEmbeddingZeroVector3(),
+          embedding: getEmbeddingZeroVector4(),
           createdAt: Date.now()
         };
         await runtime.messageManager.createMemory(responseMemory);
@@ -1158,70 +1216,27 @@ async function negotiate(runtime, client, service, workContext) {
       };
       ws.on("message", async (data) => {
         if (processing) {
-          elizaLogger3.error("Already processing a previous message");
+          elizaLogger5.error("Already processing a previous message");
           ws.close();
           return;
         }
         processing = true;
-        let message;
-        try {
-          message = NegotiationMessage.parse(JSON.parse(data.toString()));
-        } catch (error) {
-          elizaLogger3.error("Error parsing negotiation message", { error });
-          ws.close();
-          return;
-        }
-        if (message.timestamp < (/* @__PURE__ */ new Date()).getTime() - NEGOTIATION_TIMEOUT) {
-          elizaLogger3.info("GigaCrew: Message expired");
-          ws.close();
-          return;
-        }
-        if (message.trail != trail) {
-          elizaLogger3.info("GigaCrew: Invalid trail");
-          ws.close();
-          return;
-        }
-        trail = calcTrail(message);
-        const trailBytes = ethers3.getBytes("0x" + trail);
-        const extractedUser = ethers3.recoverAddress(trailBytes, message.signature);
-        if (extractedUser != service.provider) {
-          elizaLogger3.info("GigaCrew: Invalid signature", {
-            expected: service.provider,
-            extracted: extractedUser
-          });
+        const validateMessageResult = validateMessage2(data.toString(), trail, service.provider);
+        let message = validateMessageResult.message;
+        trail = validateMessageResult.trail;
+        if (!message) {
+          elizaLogger5.error("Invalid message", { message: data.toString() });
           ws.close();
           return;
         }
         if (message.type == "proposal") {
-          const GIGACREW_PROPOSAL_PREFIX = new Uint8Array(32);
-          GIGACREW_PROPOSAL_PREFIX.set(ethers3.toUtf8Bytes("GigaCrew Proposal: "));
-          const abiCoder = new ethers3.AbiCoder();
-          const proposalBytes = ethers3.getBytes(abiCoder.encode(
-            ["bytes32", "bytes32", "uint256", "uint256", "uint256"],
-            [
-              ethers3.hexlify(GIGACREW_PROPOSAL_PREFIX),
-              trailBytes,
-              message.proposalExpiry,
-              message.price,
-              message.deadline * 60
-            ]
-          ));
-          const extractedUser2 = await ethers3.recoverAddress(ethers3.keccak256(proposalBytes), message.proposalSignature);
-          if (extractedUser2 != service.provider) {
-            elizaLogger3.info("GigaCrew: Invalid proposal signature", {
-              expected: service.provider,
-              extracted: extractedUser2
-            });
-            ws.close();
-            return;
-          }
           lastProposal.terms = message.terms;
           lastProposal.price = message.price;
           lastProposal.deadline = message.deadline;
           lastProposal.proposalExpiry = message.proposalExpiry;
           lastProposal.proposalSignature = message.proposalSignature;
         }
-        const messageId = stringToUuid3(Date.now().toString());
+        const messageId = stringToUuid4(Date.now().toString());
         const content = {
           text: message.type == "proposal" ? `${message.content}
 Basically
@@ -1237,7 +1252,7 @@ deadline: ${message.deadline}minutes
           agentId: runtime.agentId
         };
         const memory = {
-          id: stringToUuid3(messageId + "-" + userId),
+          id: stringToUuid4(messageId + "-" + userId),
           ...userMessage,
           agentId: runtime.agentId,
           userId,
@@ -1253,11 +1268,11 @@ deadline: ${message.deadline}minutes
       await getInput();
     });
     ws.on("error", (error) => {
-      elizaLogger3.error("GigaCrew: Negotiation channel error", { error });
+      elizaLogger5.error("GigaCrew: Negotiation channel error", { error });
       reject(error);
     });
     ws.on("close", () => {
-      elizaLogger3.info("GigaCrew: Negotiation channel closed");
+      elizaLogger5.info("GigaCrew: Negotiation channel closed");
       if (!resolved) {
         reject(new Error("Negotiation failed"));
       }
@@ -1325,15 +1340,15 @@ var GigaCrewClient = class {
     }
     const provider_url = this.config.GIGACREW_PROVIDER_URL;
     if (provider_url.startsWith("ws://") || provider_url.startsWith("wss://")) {
-      this.provider = new ethers4.WebSocketProvider(provider_url);
+      this.provider = new ethers3.WebSocketProvider(provider_url);
     } else if (provider_url.startsWith("http://") || provider_url.startsWith("https://")) {
-      this.provider = new ethers4.JsonRpcProvider(provider_url);
+      this.provider = new ethers3.JsonRpcProvider(provider_url);
     } else {
       throw new Error("Invalid provider URL. Must start with ws://, wss://, http://, or https://");
     }
-    this.contract = new ethers4.Contract(this.config.GIGACREW_CONTRACT_ADDRESS, GigaCrewABI, this.provider);
-    this.seller = this.config.GIGACREW_SELLER_PRIVATE_KEY ? new ethers4.Wallet(this.config.GIGACREW_SELLER_PRIVATE_KEY, this.provider) : null;
-    this.buyer = this.config.GIGACREW_BUYER_PRIVATE_KEY ? new ethers4.Wallet(this.config.GIGACREW_BUYER_PRIVATE_KEY, this.provider) : null;
+    this.contract = new ethers3.Contract(this.config.GIGACREW_CONTRACT_ADDRESS, GigaCrewABI, this.provider);
+    this.seller = this.config.GIGACREW_SELLER_PRIVATE_KEY ? new ethers3.Wallet(this.config.GIGACREW_SELLER_PRIVATE_KEY, this.provider) : null;
+    this.buyer = this.config.GIGACREW_BUYER_PRIVATE_KEY ? new ethers3.Wallet(this.config.GIGACREW_BUYER_PRIVATE_KEY, this.provider) : null;
     if (((_b = (_a = runtime.character.settings) == null ? void 0 : _a.gigacrew) == null ? void 0 : _b.seller) === false) {
       this.seller = null;
     }
@@ -1361,18 +1376,18 @@ var GigaCrewClient = class {
         throw new Error("Couldn't find HIRE_AGENT action for removal");
       }
       this.runtime.actions.splice(index, 1);
-      elizaLogger4.info("Gigacrew Client: Removed HIRE_AGENT action for non buyer agent");
+      elizaLogger6.info("Gigacrew Client: Removed HIRE_AGENT action for non buyer agent");
     }
     this.filters = [];
   }
   async start() {
     if (this.seller) {
-      elizaLogger4.info("Gigacrew Client: Starting seller handler");
+      elizaLogger6.info("Gigacrew Client: Starting seller handler");
       this.filters.push(...await this.sellerHandler.filters());
       this.sellerHandler.start();
     }
     if (this.buyer) {
-      elizaLogger4.info("Gigacrew Client: Starting buyer handler");
+      elizaLogger6.info("Gigacrew Client: Starting buyer handler");
       this.filters.push(...await this.buyerHandler.filters());
       this.buyerHandler.start();
     }
@@ -1382,7 +1397,7 @@ var GigaCrewClient = class {
     } else {
       fromBlock = Math.max(this.config.GIGACREW_FROM_BLOCK, await this.runtime.cacheManager.get("gigacrew_last_block") || 0);
     }
-    elizaLogger4.info("Gigacrew Event Listener: Start", { lastBlock: fromBlock });
+    elizaLogger6.info("Gigacrew Event Listener: Start", { lastBlock: fromBlock });
     this.listen(fromBlock);
   }
   async listen(fromBlock) {
@@ -1418,6 +1433,7 @@ var GigaCrew = class {
 };
 
 // src/index.ts
+import { NegotiationMessage as NegotiationMessage3, calcTrail as calcTrail3 } from "gigacrew-negotiation";
 var gigaCrewPlugin = {
   name: "GigaCrew",
   description: "GigaCrew plugin",
@@ -1426,6 +1442,9 @@ var gigaCrewPlugin = {
 };
 var index_default = gigaCrewPlugin;
 export {
+  GigaCrewListServicesAction,
+  NegotiationMessage3 as NegotiationMessage,
+  calcTrail3 as calcTrail,
   index_default as default
 };
 //# sourceMappingURL=index.js.map

@@ -844,21 +844,23 @@ var GigaCrewListServicesAction = {
 Title: ${service.title.replace(/\\n/g, " ")}
 Description: ${service.description.replace(/\\n/g, " ")}
 Provider: ${service.provider}`).join("\n\n");
+    const content = {
+      text: `I used the following query to search for services for you
+Query: ${query}
+
+` + serviceList
+    };
     const responseMessage = {
       id: stringToUuid3(stringToUuid3(Date.now().toString()) + "-" + runtime.agentId),
       userId: runtime.agentId,
       agentId: runtime.agentId,
       roomId: message.roomId,
-      content: {
-        text: serviceList
-      },
+      content,
       embedding: getEmbeddingZeroVector3(),
       createdAt: Date.now()
     };
     await runtime.messageManager.createMemory(responseMessage);
-    callback({
-      text: serviceList
-    });
+    callback(content);
   }
 };
 

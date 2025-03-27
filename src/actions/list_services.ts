@@ -61,22 +61,22 @@ export const GigaCrewListServicesAction: Action = {
         const chosen_services = await handleServiceSelection(serviceSelectionResponse, services, true) as GigaCrewService[];
 
         const serviceList = chosen_services.map(service => `ID: ${service.serviceId}\nTitle: ${service.title.replace(/\\n/g, " ")}\nDescription: ${service.description.replace(/\\n/g, " ")}\nProvider: ${service.provider}`).join("\n\n");
+        const content = {
+            text: `I used the following query to search for services for you\nQuery: ${query}\n\n` + serviceList
+        };
+        
         const responseMessage: Memory = {
             id: stringToUuid(stringToUuid(Date.now().toString()) + "-" + runtime.agentId),
             userId: runtime.agentId,
             agentId: runtime.agentId,
             roomId: message.roomId,
-            content: {
-                text: serviceList,
-            },
+            content,
             embedding: getEmbeddingZeroVector(),
             createdAt: Date.now(),
         };
 
         await runtime.messageManager.createMemory(responseMessage);
 
-        callback({
-            text: serviceList,
-        });
+        callback(content);
     }
 }

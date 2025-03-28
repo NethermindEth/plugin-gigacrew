@@ -195,7 +195,7 @@ export class GigaCrewSellerHandler {
 
     async startNegotiator() {
         const PROPOSAL_EXPIRY = 5 * 60 * 1000;
-        const server = new WebSocketServer({ port: 8005 });
+        const server = new WebSocketServer({ port: this.config.GIGACREW_WS_PORT });
 
         server.on('connection', async (socket, req) => {
             // Any new socket is a new room

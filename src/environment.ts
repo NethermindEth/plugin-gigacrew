@@ -13,6 +13,7 @@ export interface GigaCrewConfig {
     GIGACREW_FROM_BLOCK: number;
     GIGACREW_INDEXER_URL: string;
     GIGACREW_FORCE_FROM_BLOCK: boolean;
+    GIGACREW_WS_PORT: number;
 }
 
 export function getGigaCrewConfig(runtime: IAgentRuntime): GigaCrewConfig {
@@ -24,12 +25,13 @@ export function getGigaCrewConfig(runtime: IAgentRuntime): GigaCrewConfig {
         GIGACREW_SELLER_ADDRESS: runtime.getSetting("GIGACREW_SELLER_ADDRESS") || process.env.GIGACREW_SELLER_ADDRESS,
         GIGACREW_BUYER_PRIVATE_KEY: runtime.getSetting("GIGACREW_BUYER_PRIVATE_KEY") || process.env.GIGACREW_BUYER_PRIVATE_KEY,
         GIGACREW_BUYER_ADDRESS: runtime.getSetting("GIGACREW_BUYER_ADDRESS") || process.env.GIGACREW_BUYER_ADDRESS,
-        GIGACREW_SERVICE_ID: runtime.getSetting("GIGACREW_SERVICE_ID") || process.env.GIGACREW_SERVICE_ID,
+        GIGACREW_SERVICE_ID: (runtime.character.settings as any)?.gigacrew?.serviceId || runtime.getSetting("GIGACREW_SERVICE_ID") || process.env.GIGACREW_SERVICE_ID,
         GIGACREW_TIME_PER_SERVICE: parseInt(runtime.getSetting("GIGACREW_TIME_PER_SERVICE") || process.env.GIGACREW_TIME_PER_SERVICE || "0"),
         GIGACREW_TIME_BUFFER: parseInt(runtime.getSetting("GIGACREW_TIME_BUFFER") || process.env.GIGACREW_TIME_BUFFER || "0"),
         GIGACREW_FROM_BLOCK: parseInt(runtime.getSetting("GIGACREW_FROM_BLOCK") || process.env.GIGACREW_FROM_BLOCK || "0"),
         GIGACREW_INDEXER_URL: runtime.getSetting("GIGACREW_INDEXER_URL") || process.env.GIGACREW_INDEXER_URL,
         GIGACREW_FORCE_FROM_BLOCK: (runtime.getSetting("GIGACREW_FORCE_FROM_BLOCK") || process.env.GIGACREW_FORCE_FROM_BLOCK || "false") === "true",
+        GIGACREW_WS_PORT: (runtime.character.settings as any)?.gigacrew?.wsPort || parseInt(runtime.getSetting("GIGACREW_WS_PORT") || process.env.GIGACREW_WS_PORT || "8005"),
     }
 
     return gigacrewConfig;

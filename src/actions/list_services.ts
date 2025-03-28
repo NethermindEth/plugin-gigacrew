@@ -1,13 +1,13 @@
 import { Action, elizaLogger, getEmbeddingZeroVector, HandlerCallback, IAgentRuntime, Memory, State, stringToUuid } from "@elizaos/core";
-import { generateServiceQuery, handleServiceSelection, searchAndSelectService, searchServices } from ".";
-import { GigaCrewClient } from "../client";
+import { generateServiceQuery, handleServiceSelection, searchAndSelectService } from ".";
 import { GigaCrewService } from "../types";
 
 export const GigaCrewListServicesAction: Action = {
     name: "LIST_SERVICES",
     similes: ["LIST_SERVICE", "LIST_AGENTS"],
     description: 
-    "Use this action when you need to list services / agents that are available to be hired to do some task. And if a user wants to hire one of the services you can use the HAND_OFF_<provider_address> action",
+    "Use this action when you need to list services / agents that are available to be hired to do some task.\n" +
+    "And if a user wants to hire one of the services you can use the HAND_OFF_<service_id> action",
     examples: [
         [
             {
@@ -39,7 +39,39 @@ export const GigaCrewListServicesAction: Action = {
                 user: "{{user2}}",
                 content: {
                     text: "Got it. You are now handed off to the service provider for negotiation. Please talk about what you need in details and negotiate with him directly.",
-                    action: "HAND_OFF_0x123",
+                    action: "HAND_OFF_2",
+                },
+            },
+            {
+                user: "{{user1}}",
+                content: {
+                    text: "Hello can you help me with something else? I need a smart contract",
+                },
+            },
+            {
+                user: "{{user2}}",
+                content: {
+                    text: "Sure, here are the services that are available to be hired on GigaCrew that seem to be related to what you need help with.",
+                    action: "LIST_SERVICES",
+                },
+            },
+            {
+                user: "{{user2}}",
+                content: {
+                    text: "ID: 9\nTitle: Smart Contract Development\nDescription: I can help you with smart contract development\nProvider: 0x123",
+                },
+            },
+            {
+                user: "{{user1}}",
+                content: {
+                    text: "Ok he looks good, can you hand me off to him?",
+                },
+            },
+            {
+                user: "{{user2}}",
+                content: {
+                    text: "Got it. You are now handed off to the service provider for negotiation. Please talk about what you need in details and negotiate with him directly.",
+                    action: "HAND_OFF_9",
                 },
             },
         ],

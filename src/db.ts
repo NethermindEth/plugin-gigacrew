@@ -14,6 +14,7 @@ export class GigaCrewDatabase {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS gigacrew_orders (
                 order_id TEXT PRIMARY KEY,
+                service_id TEXT,
                 buyer_address TEXT,
                 seller_address TEXT,
                 status INTEGER,
@@ -31,16 +32,17 @@ export class GigaCrewDatabase {
 
             CREATE TABLE IF NOT EXISTS gigacrew_proposals (
                 proposal_id TEXT PRIMARY KEY,
+                service_id TEXT,
                 terms TEXT,
                 proposal_expiry DATETIME
             );
         `);
     }
 
-    async insertProposal(proposalId: string, terms: string, proposalExpiry: string) {
+    async insertProposal(proposalId: string, serviceId: string, terms: string, proposalExpiry: string) {
         return await this.db.prepare(`
-            INSERT INTO gigacrew_proposals (proposal_id, terms, proposal_expiry) VALUES (?, ?, datetime(?, 'unixepoch'));
-        `).run(proposalId, terms, proposalExpiry);
+            INSERT INTO gigacrew_proposals (proposal_id, service_id, terms, proposal_expiry) VALUES (?, ?, ?, datetime(?, 'unixepoch'));
+        `).run(proposalId, serviceId, terms, proposalExpiry);
     }
 
     async deleteExpiredProposals() {
@@ -49,11 +51,11 @@ export class GigaCrewDatabase {
         `).run();
     }
 
-    async insertOrder(orderId: string, buyer: string, seller: string, status: string, terms: string, price: string, deadline: string, callbackData?: string) {
+    async insertOrder(orderId: string, serviceId: string, buyer: string, seller: string, status: string, terms: string, price: string, deadline: string, callbackData?: string) {
         if (!terms) {
             const proposal = await this.db.prepare(`
-                    SELECT * FROM gigacrew_proposals WHERE proposal_id = ?;
-            `).get(orderId);
+                    SELECT * FROM gigacrew_proposals WHERE proposal_id = ? AND service_id = ?;
+            `).get(orderId, serviceId);
 
             if (!proposal) {
                 console.error("Proposal not found");
@@ -64,9 +66,9 @@ export class GigaCrewDatabase {
         }
 
         await this.db.prepare(`
-            INSERT INTO gigacrew_orders (order_id, buyer_address, seller_address, status, context, price, deadline, callback_data) 
-            VALUES (?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?) ON CONFLICT(order_id) DO NOTHING;
-        `).run(orderId, buyer, seller, status, terms, price, deadline, callbackData);
+            INSERT INTO gigacrew_orders (order_id, service_id, buyer_address, seller_address, status, context, price, deadline, callback_data) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?) ON CONFLICT(order_id) DO NOTHING;
+        `).run(orderId, serviceId, buyer, seller, status, terms, price, deadline, callbackData);
     }
 
     async setStatus(orderId: string, status: string) {
@@ -112,25 +114,27 @@ export class GigaCrewDatabase {
         `).run(...orderIds);
     }
 
-    async getActiveOrdersForSeller(seller: string) {
+    async getActiveOrdersForSeller(serviceId: string, seller: string) {
         return await this.db.prepare(`
             SELECT * FROM gigacrew_orders WHERE
                 status = ${Status.Pending} AND
                 failed_attempts < 3 AND
                 seller_address = ? AND
+                service_id = ? AND
                 deadline > datetime('now') AND lock_period IS NULL
                     ORDER BY deadline ASC;
-        `).all(seller);
+        `).all(seller, serviceId);
     }
 
-    async getWithdrawableOrdersForSeller(seller: string) {
+    async getWithdrawableOrdersForSeller(serviceId: string, seller: string) {
         return await this.db.prepare(`
             SELECT * FROM gigacrew_orders WHERE
                 seller_address = ? AND
+                service_id = ? AND
                 can_seller_withdraw = TRUE AND
                 (status = ${Status.Pending} OR status = ${Status.BuyerWithdrawn}) AND
                 (lock_period < datetime('now') OR resolution_period < datetime('now'));
-        `).all(seller);
+        `).all(seller, serviceId);
     }
 
     async getWithdrawableOrdersForBuyer(buyer: string) {

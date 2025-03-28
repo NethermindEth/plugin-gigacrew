@@ -59,6 +59,7 @@ export class GigaCrewBuyerHandler {
         const deadline = tx.logs[0].args[4].toString();
         await this.db.insertOrder(
             negotiationResult.orderId,
+            this.serviceId,
             this.buyer.address,
             service.provider,
             "0",

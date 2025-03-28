@@ -4,6 +4,7 @@ import { ethers as ethers3 } from "ethers";
 
 // src/environment.ts
 function getGigaCrewConfig(runtime) {
+  var _a, _b, _c, _d;
   const gigacrewConfig = {
     GIGACREW_PROVIDER_URL: runtime.getSetting("GIGACREW_PROVIDER_URL") || process.env.GIGACREW_PROVIDER_URL,
     GIGACREW_CONTRACT_ADDRESS: runtime.getSetting("GIGACREW_CONTRACT_ADDRESS") || process.env.GIGACREW_CONTRACT_ADDRESS,
@@ -11,12 +12,13 @@ function getGigaCrewConfig(runtime) {
     GIGACREW_SELLER_ADDRESS: runtime.getSetting("GIGACREW_SELLER_ADDRESS") || process.env.GIGACREW_SELLER_ADDRESS,
     GIGACREW_BUYER_PRIVATE_KEY: runtime.getSetting("GIGACREW_BUYER_PRIVATE_KEY") || process.env.GIGACREW_BUYER_PRIVATE_KEY,
     GIGACREW_BUYER_ADDRESS: runtime.getSetting("GIGACREW_BUYER_ADDRESS") || process.env.GIGACREW_BUYER_ADDRESS,
-    GIGACREW_SERVICE_ID: runtime.getSetting("GIGACREW_SERVICE_ID") || process.env.GIGACREW_SERVICE_ID,
+    GIGACREW_SERVICE_ID: ((_b = (_a = runtime.character.settings) == null ? void 0 : _a.gigacrew) == null ? void 0 : _b.serviceId) || runtime.getSetting("GIGACREW_SERVICE_ID") || process.env.GIGACREW_SERVICE_ID,
     GIGACREW_TIME_PER_SERVICE: parseInt(runtime.getSetting("GIGACREW_TIME_PER_SERVICE") || process.env.GIGACREW_TIME_PER_SERVICE || "0"),
     GIGACREW_TIME_BUFFER: parseInt(runtime.getSetting("GIGACREW_TIME_BUFFER") || process.env.GIGACREW_TIME_BUFFER || "0"),
     GIGACREW_FROM_BLOCK: parseInt(runtime.getSetting("GIGACREW_FROM_BLOCK") || process.env.GIGACREW_FROM_BLOCK || "0"),
     GIGACREW_INDEXER_URL: runtime.getSetting("GIGACREW_INDEXER_URL") || process.env.GIGACREW_INDEXER_URL,
-    GIGACREW_FORCE_FROM_BLOCK: (runtime.getSetting("GIGACREW_FORCE_FROM_BLOCK") || process.env.GIGACREW_FORCE_FROM_BLOCK || "false") === "true"
+    GIGACREW_FORCE_FROM_BLOCK: (runtime.getSetting("GIGACREW_FORCE_FROM_BLOCK") || process.env.GIGACREW_FORCE_FROM_BLOCK || "false") === "true",
+    GIGACREW_WS_PORT: ((_d = (_c = runtime.character.settings) == null ? void 0 : _c.gigacrew) == null ? void 0 : _d.wsPort) || parseInt(runtime.getSetting("GIGACREW_WS_PORT") || process.env.GIGACREW_WS_PORT || "8005")
   };
   return gigacrewConfig;
 }
@@ -87,7 +89,7 @@ var GigaCrewSellerHandler = class {
       seller,
       deadline
     });
-    this.db.insertOrder(orderId.toString(), buyer, seller, "0", null, price.toString(), deadline.toString());
+    this.db.insertOrder(orderId.toString(), this.serviceId, buyer, seller, "0", null, price.toString(), deadline.toString());
   }
   async start() {
     const [paused, provider, title, description, communicationChannel] = await this.contract.services(this.serviceId);
@@ -108,7 +110,7 @@ var GigaCrewSellerHandler = class {
   }
   async handleOrders() {
     var _a;
-    const orders = await this.db.getActiveOrdersForSeller(this.seller.address);
+    const orders = await this.db.getActiveOrdersForSeller(this.serviceId, this.seller.address);
     for (const order of orders) {
       const { order_id: orderId, service_id: serviceId, buyer_address: buyer, seller_address: seller, context, deadline } = order;
       const deadlineTimestamp = (/* @__PURE__ */ new Date(deadline + "Z")).getTime() / 1e3;
@@ -152,7 +154,7 @@ var GigaCrewSellerHandler = class {
   }
   async handleWithdrawals() {
     var _a, _b;
-    const withdrawals = await this.db.getWithdrawableOrdersForSeller(this.seller.address);
+    const withdrawals = await this.db.getWithdrawableOrdersForSeller(this.serviceId, this.seller.address);
     const cantWithdrawIds = [];
     for (const withdrawal of withdrawals) {
       const { order_id: orderId } = withdrawal;
@@ -193,7 +195,7 @@ var GigaCrewSellerHandler = class {
   }
   async startNegotiator() {
     const PROPOSAL_EXPIRY = 5 * 60 * 1e3;
-    const server = new WebSocketServer({ port: 8005 });
+    const server = new WebSocketServer({ port: this.config.GIGACREW_WS_PORT });
     server.on("connection", async (socket, req) => {
       const roomId = crypto2.randomUUID();
       let buyer;
@@ -343,7 +345,7 @@ deadline: ${response.deadline}minutes
         };
         await this.runtime.messageManager.createMemory(responseMemory);
         if (responseMessage.type == "proposal") {
-          await this.db.insertProposal("0x" + trail, responseMessage.terms, responseMessage.proposalExpiry.toString());
+          await this.db.insertProposal("0x" + trail, this.serviceId, responseMessage.terms, responseMessage.proposalExpiry.toString());
         }
         socket.send(JSON.stringify(responseMessage));
         processing = false;
@@ -442,6 +444,7 @@ var GigaCrewBuyerHandler = class {
     const deadline = tx.logs[0].args[4].toString();
     await this.db.insertOrder(
       negotiationResult.orderId,
+      this.serviceId,
       this.buyer.address,
       service.provider,
       "0",
@@ -543,6 +546,7 @@ var GigaCrewDatabase = class {
     this.db.exec(`
             CREATE TABLE IF NOT EXISTS gigacrew_orders (
                 order_id TEXT PRIMARY KEY,
+                service_id TEXT,
                 buyer_address TEXT,
                 seller_address TEXT,
                 status INTEGER,
@@ -560,26 +564,27 @@ var GigaCrewDatabase = class {
 
             CREATE TABLE IF NOT EXISTS gigacrew_proposals (
                 proposal_id TEXT PRIMARY KEY,
+                service_id TEXT,
                 terms TEXT,
                 proposal_expiry DATETIME
             );
         `);
   }
-  async insertProposal(proposalId, terms, proposalExpiry) {
+  async insertProposal(proposalId, serviceId, terms, proposalExpiry) {
     return await this.db.prepare(`
-            INSERT INTO gigacrew_proposals (proposal_id, terms, proposal_expiry) VALUES (?, ?, datetime(?, 'unixepoch'));
-        `).run(proposalId, terms, proposalExpiry);
+            INSERT INTO gigacrew_proposals (proposal_id, service_id, terms, proposal_expiry) VALUES (?, ?, ?, datetime(?, 'unixepoch'));
+        `).run(proposalId, serviceId, terms, proposalExpiry);
   }
   async deleteExpiredProposals() {
     return await this.db.prepare(`
             DELETE FROM gigacrew_proposals WHERE proposal_expiry < datetime('now', '-5 minutes');
         `).run();
   }
-  async insertOrder(orderId, buyer, seller, status, terms, price, deadline, callbackData) {
+  async insertOrder(orderId, serviceId, buyer, seller, status, terms, price, deadline, callbackData) {
     if (!terms) {
       const proposal = await this.db.prepare(`
-                    SELECT * FROM gigacrew_proposals WHERE proposal_id = ?;
-            `).get(orderId);
+                    SELECT * FROM gigacrew_proposals WHERE proposal_id = ? AND service_id = ?;
+            `).get(orderId, serviceId);
       if (!proposal) {
         console.error("Proposal not found");
         return;
@@ -587,9 +592,9 @@ var GigaCrewDatabase = class {
       terms = proposal.terms;
     }
     await this.db.prepare(`
-            INSERT INTO gigacrew_orders (order_id, buyer_address, seller_address, status, context, price, deadline, callback_data) 
-            VALUES (?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?) ON CONFLICT(order_id) DO NOTHING;
-        `).run(orderId, buyer, seller, status, terms, price, deadline, callbackData);
+            INSERT INTO gigacrew_orders (order_id, service_id, buyer_address, seller_address, status, context, price, deadline, callback_data) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?) ON CONFLICT(order_id) DO NOTHING;
+        `).run(orderId, serviceId, buyer, seller, status, terms, price, deadline, callbackData);
   }
   async setStatus(orderId, status) {
     return await this.db.prepare(`
@@ -627,24 +632,26 @@ var GigaCrewDatabase = class {
             DELETE FROM gigacrew_orders WHERE order_id IN (${placeholders});
         `).run(...orderIds);
   }
-  async getActiveOrdersForSeller(seller) {
+  async getActiveOrdersForSeller(serviceId, seller) {
     return await this.db.prepare(`
             SELECT * FROM gigacrew_orders WHERE
                 status = ${0 /* Pending */} AND
                 failed_attempts < 3 AND
                 seller_address = ? AND
+                service_id = ? AND
                 deadline > datetime('now') AND lock_period IS NULL
                     ORDER BY deadline ASC;
-        `).all(seller);
+        `).all(seller, serviceId);
   }
-  async getWithdrawableOrdersForSeller(seller) {
+  async getWithdrawableOrdersForSeller(serviceId, seller) {
     return await this.db.prepare(`
             SELECT * FROM gigacrew_orders WHERE
                 seller_address = ? AND
+                service_id = ? AND
                 can_seller_withdraw = TRUE AND
                 (status = ${0 /* Pending */} OR status = ${2 /* BuyerWithdrawn */}) AND
                 (lock_period < datetime('now') OR resolution_period < datetime('now'));
-        `).all(seller);
+        `).all(seller, serviceId);
   }
   async getWithdrawableOrdersForBuyer(buyer) {
     return await this.db.prepare(`
@@ -793,7 +800,7 @@ import { elizaLogger as elizaLogger3, getEmbeddingZeroVector as getEmbeddingZero
 var GigaCrewListServicesAction = {
   name: "LIST_SERVICES",
   similes: ["LIST_SERVICE", "LIST_AGENTS"],
-  description: "Use this action when you need to list services / agents that are available to be hired to do some task. And if a user wants to hire one of the services you can use the HAND_OFF_<provider_address> action",
+  description: "Use this action when you need to list services / agents that are available to be hired to do some task.\nAnd if a user wants to hire one of the services you can use the HAND_OFF_<service_id> action",
   examples: [
     [
       {
@@ -825,7 +832,39 @@ var GigaCrewListServicesAction = {
         user: "{{user2}}",
         content: {
           text: "Got it. You are now handed off to the service provider for negotiation. Please talk about what you need in details and negotiate with him directly.",
-          action: "HAND_OFF_0x123"
+          action: "HAND_OFF_2"
+        }
+      },
+      {
+        user: "{{user1}}",
+        content: {
+          text: "Hello can you help me with something else? I need a smart contract"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Sure, here are the services that are available to be hired on GigaCrew that seem to be related to what you need help with.",
+          action: "LIST_SERVICES"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "ID: 9\nTitle: Smart Contract Development\nDescription: I can help you with smart contract development\nProvider: 0x123"
+        }
+      },
+      {
+        user: "{{user1}}",
+        content: {
+          text: "Ok he looks good, can you hand me off to him?"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Got it. You are now handed off to the service provider for negotiation. Please talk about what you need in details and negotiate with him directly.",
+          action: "HAND_OFF_9"
         }
       }
     ]
@@ -1041,7 +1080,7 @@ async function generateServiceQuery(runtime, state) {
   });
   return query;
 }
-async function searchServices2(runtime, query) {
+async function searchServices(runtime, query) {
   const endpoint = (runtime.getSetting("GIGACREW_INDEXER_URL") || process.env.GIGACREW_INDEXER_URL) + "/api/services/search";
   const response = await fetch(`${endpoint}?query=${encodeURIComponent(query)}&limit=10`);
   const data = await response.json();
@@ -1052,7 +1091,7 @@ async function searchAndSelectService(runtime, query, state, many = false) {
   let serviceSelectionResponse = null;
   let retries = 0;
   do {
-    services = await searchServices2(runtime, query);
+    services = await searchServices(runtime, query);
     elizaLogger5.info("GigaCrew HIRE_AGENT action searched for services", {
       services
     });

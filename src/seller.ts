@@ -69,7 +69,7 @@ export class GigaCrewSellerHandler {
             seller,
             deadline
         });
-        this.db.insertOrder(orderId.toString(), buyer, seller, "0", null, price.toString(), deadline.toString());
+        this.db.insertOrder(orderId.toString(), this.serviceId, buyer, seller, "0", null, price.toString(), deadline.toString());
     }
 
     async start() {
@@ -95,7 +95,7 @@ export class GigaCrewSellerHandler {
     }
 
     async handleOrders() {
-        const orders = await this.db.getActiveOrdersForSeller(this.seller.address);
+        const orders = await this.db.getActiveOrdersForSeller(this.serviceId, this.seller.address);
         for (const order of orders) {
             const { order_id: orderId, service_id: serviceId, buyer_address: buyer, seller_address: seller, context, deadline } = order;
             const deadlineTimestamp = new Date(deadline + 'Z').getTime() / 1000;
@@ -143,7 +143,7 @@ export class GigaCrewSellerHandler {
     }
 
     async handleWithdrawals() {
-        const withdrawals = await this.db.getWithdrawableOrdersForSeller(this.seller.address);
+        const withdrawals = await this.db.getWithdrawableOrdersForSeller(this.serviceId, this.seller.address);
         const cantWithdrawIds = [];
 
         for (const withdrawal of withdrawals) {
@@ -367,7 +367,7 @@ export class GigaCrewSellerHandler {
                 await this.runtime.messageManager.createMemory(responseMemory);
 
                 if (responseMessage.type == "proposal") {
-                    await this.db.insertProposal("0x" + trail, responseMessage.terms, responseMessage.proposalExpiry.toString());
+                    await this.db.insertProposal("0x" + trail, this.serviceId, responseMessage.terms, responseMessage.proposalExpiry.toString());
                 }
 
                 socket.send(JSON.stringify(responseMessage));

@@ -14,6 +14,7 @@ export interface GigaCrewConfig {
     GIGACREW_INDEXER_URL: string;
     GIGACREW_FORCE_FROM_BLOCK: boolean;
     GIGACREW_WS_PORT: number;
+    GIGACREW_WORK_TERMS_TEMPLATE: string;
 }
 
 export function getGigaCrewConfig(runtime: IAgentRuntime): GigaCrewConfig {
@@ -32,6 +33,7 @@ export function getGigaCrewConfig(runtime: IAgentRuntime): GigaCrewConfig {
         GIGACREW_INDEXER_URL: runtime.getSetting("GIGACREW_INDEXER_URL") || process.env.GIGACREW_INDEXER_URL,
         GIGACREW_FORCE_FROM_BLOCK: (runtime.getSetting("GIGACREW_FORCE_FROM_BLOCK") || process.env.GIGACREW_FORCE_FROM_BLOCK || "false") === "true",
         GIGACREW_WS_PORT: (runtime.character.settings as any)?.gigacrew?.wsPort || parseInt(runtime.getSetting("GIGACREW_WS_PORT") || process.env.GIGACREW_WS_PORT || "8005"),
+        GIGACREW_WORK_TERMS_TEMPLATE: (runtime.character.settings as any)?.gigacrew?.workTermsTemplate || "The Service Being Provided:\nTitle: {{serviceTitle}}\nDescription: {{serviceDescription}}\nBased on this extract any and all relevant information from the finally agreed upon details in the following conversation for the work to be done. The final proposal you see is the one that was accepted despite the acceptance not being in the conversation. Here's the conversation: {{recentMessages}}",
     }
 
     return gigacrewConfig;

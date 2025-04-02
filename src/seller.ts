@@ -1,4 +1,4 @@
-import { composeContext, Content, generateMessageResponse, getEmbeddingZeroVector, IAgentRuntime, Memory, ModelClass, State, stringToUuid, UUID } from "@elizaos/core";
+import { composeContext, Content, generateMessageResponse, generateText, getEmbeddingZeroVector, IAgentRuntime, Memory, ModelClass, State, stringToUuid, UUID } from "@elizaos/core";
 import { elizaLogger } from "@elizaos/core";
 import { GigaCrewDatabase } from "./db";
 import { ethers, EventLog, Log } from "ethers";
@@ -18,6 +18,7 @@ export class GigaCrewSellerHandler {
     db: GigaCrewDatabase;
     totalTime: number;
     work: WorkFunction;
+    workTermsTemplate: string;
     service: any;
 
     constructor(runtime: IAgentRuntime, seller: ethers.Wallet, contract: ethers.Contract, config: GigaCrewConfig, db: GigaCrewDatabase, work: WorkFunction) {
@@ -29,6 +30,7 @@ export class GigaCrewSellerHandler {
         this.totalTime = config.GIGACREW_TIME_PER_SERVICE + config.GIGACREW_TIME_BUFFER;
         this.config = config;
         this.work = work;
+        this.workTermsTemplate = config.GIGACREW_WORK_TERMS_TEMPLATE;
         this.db = db;
     }
 
@@ -367,9 +369,18 @@ export class GigaCrewSellerHandler {
                 await this.runtime.messageManager.createMemory(responseMemory);
 
                 if (responseMessage.type == "proposal") {
-                    await this.db.insertProposal("0x" + trail, this.serviceId, responseMessage.terms, responseMessage.proposalExpiry.toString());
+                    state = await this.runtime.updateRecentMessageState(state);
+                    const workTermsContext = composeContext({
+                        state,
+                        template: this.workTermsTemplate,
+                    });
+                    const workTerms = await generateText({
+                        runtime: this.runtime,
+                        context: workTermsContext,
+                        modelClass: ModelClass.MEDIUM,
+                    });
+                    await this.db.insertProposal("0x" + trail, this.serviceId, workTerms, responseMessage.proposalExpiry.toString());
                 }
-
                 socket.send(JSON.stringify(responseMessage));
                 processing = false;
             });
